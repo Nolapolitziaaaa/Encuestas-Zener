@@ -1,0 +1,19 @@
+{
+  "name": "encuestas-zener",
+  "version": "1.0.0",
+  "description": "Encuestas Zener Chile - Sistema de evaluación de proveedores",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && cd client && npm install && cd ../server && npm install",
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "cd server && npm start",
+    "db:init": "psql -U postgres -d encuestas_zener -f database/init.sql",
+    "db:seed": "psql -U postgres -d encuestas_zener -f database/seed.sql"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
