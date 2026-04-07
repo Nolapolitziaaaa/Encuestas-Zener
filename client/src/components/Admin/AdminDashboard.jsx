@@ -42,16 +42,10 @@ export default function AdminDashboard() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <StatsCard label="Usuarios" value={stats.total_proveedores} icon={Users} color="blue" />
+        <StatsCard label="Proveedores" value={stats.total_proveedores} icon={Users} color="blue" />
         <StatsCard label="Plantillas Activas" value={stats.plantillas_activas} icon={FileText} color="green" />
         <StatsCard label="Formularios" value={stats.total_formularios} icon={ClipboardList} color="purple" />
-        <StatsCard label="Respuestas Recibidas" value={stats.asignaciones_completadas} icon={CheckCircle} color="green" subtext={`de ${stats.total_asignaciones} asignaciones`} />
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatsCard label="Pendientes" value={stats.formularios_pendientes} icon={Clock} color="yellow" />
-        <StatsCard label="Completados" value={stats.formularios_completados} icon={CheckCircle} color="green" />
-        <StatsCard label="Vencidos" value={stats.formularios_vencidos} icon={AlertTriangle} color="red" />
+        <StatsCard label="Respuestas" value={stats.asignaciones_completadas} icon={CheckCircle} color="green" subtext={`de ${stats.total_asignaciones} asignaciones`} />
       </div>
 
       {/* Acciones rápidas */}
