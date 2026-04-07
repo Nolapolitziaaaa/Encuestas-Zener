@@ -197,7 +197,7 @@ export default function FieldRenderer({
             <div className="flex items-center px-4 py-3 bg-[#f0fdf4] border border-[#86efac] rounded-md">
               <CheckCircle className="w-5 h-5 text-[#22c55e] mr-3 flex-shrink-0" />
               <FileText className="w-4 h-4 text-[#64748b] mr-2 flex-shrink-0" />
-              <span className="text-sm text-[#334155] flex-1 truncate">{value}</span>
+              <span className="text-sm text-[#334155] flex-1 truncate">{(value || '').split('/').pop()}</span>
               {!disabled && (
                 <button
                   type="button"

@@ -10,6 +10,7 @@ router.get('/:id', verifyToken, templateController.getById);
 router.post('/', verifyToken, requireAdmin, [
   body('nombre').notEmpty().withMessage('Nombre requerido'),
 ], templateController.create);
+router.post('/:id/duplicate', verifyToken, requireAdmin, templateController.duplicate);
 router.put('/:id', verifyToken, requireAdmin, [
   param('id').isInt().withMessage('ID inválido'),
 ], templateController.update);

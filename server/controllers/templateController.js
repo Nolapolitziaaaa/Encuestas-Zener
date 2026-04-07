@@ -216,6 +216,69 @@ const update = async (req, res) => {
   }
 };
 
+const duplicate = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { id } = req.params;
+
+    const original = await client.query('SELECT * FROM plantillas WHERE id = $1', [id]);
+    if (original.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Plantilla no encontrada' });
+    }
+
+    const orig = original.rows[0];
+    const nuevoNombre = req.body.nombre?.trim() || (orig.nombre + ' (copia)');
+
+    const newResult = await client.query(
+      `INSERT INTO plantillas (nombre, descripcion, creado_por, activa)
+       VALUES ($1, $2, $3, $4) RETURNING *`,
+      [nuevoNombre, orig.descripcion, req.user.id, false]
+    );
+
+    const newId = newResult.rows[0].id;
+
+    const fields = await client.query(
+      'SELECT * FROM campos_plantilla WHERE plantilla_id = $1 ORDER BY orden',
+      [id]
+    );
+
+    for (const campo of fields.rows) {
+      let opciones = campo.opciones;
+      if (opciones && typeof opciones === 'string') {
+        try { opciones = JSON.parse(opciones); } catch { opciones = []; }
+      }
+      if (!Array.isArray(opciones)) opciones = [];
+
+      await client.query(
+        `INSERT INTO campos_plantilla (plantilla_id, etiqueta, tipo, requerido, opciones, orden, placeholder)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [newId, campo.etiqueta, campo.tipo, campo.requerido, JSON.stringify(opciones), campo.orden, campo.placeholder]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const newFields = await pool.query(
+      'SELECT * FROM campos_plantilla WHERE plantilla_id = $1 ORDER BY orden',
+      [newId]
+    );
+
+    res.status(201).json({
+      ...newResult.rows[0],
+      campos: newFields.rows,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error duplicando plantilla:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
+  }
+};
+
 const remove = async (req, res) => {
   try {
     const { id } = req.params;
@@ -245,4 +308,4 @@ const remove = async (req, res) => {
   }
 };
 
-module.exports = { list, getById, create, update, remove };
+module.exports = { list, getById, create, update, duplicate, remove };

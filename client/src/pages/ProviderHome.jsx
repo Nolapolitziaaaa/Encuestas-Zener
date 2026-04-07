@@ -5,12 +5,13 @@ import formService from '../services/formService';
 import Navbar from '../components/Layout/Navbar';
 import Footer from '../components/Layout/Footer';
 import StatsCard from '../components/Common/StatsCard';
-import { ClipboardList, CheckCircle, Clock, AlertTriangle, ChevronRight } from 'lucide-react';
+import { ClipboardList, CheckCircle, Clock, AlertTriangle, ChevronRight, XCircle } from 'lucide-react';
 
 export default function ProviderHome() {
   const { user } = useAuth();
   const [pending, setPending] = useState([]);
   const [completed, setCompleted] = useState([]);
+  const [rejected, setRejected] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,6 +26,8 @@ export default function ProviderHome() {
       ]);
       setPending(pendingRes || []);
       setCompleted(completedRes || []);
+      setRejected((completedRes || []).filter((item) => item.estado_validacion === 'rechazado'));
+      setCompleted((completedRes || []).filter((item) => item.estado_validacion !== 'rechazado'));
     } catch (err) {
       console.error('Error cargando datos:', err);
     } finally {
@@ -136,6 +139,42 @@ export default function ProviderHome() {
             </div>
           )}
         </div>
+
+        {/* Formularios Rechazados */}
+        {rejected.length > 0 && (
+          <div className="card mb-8">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+              <XCircle className="w-5 h-5 text-red-500 mr-2" />
+              Requieren Correccion
+            </h2>
+            <div className="space-y-3">
+              {rejected.map((item) => (
+                <div
+                  key={item.asignacion_id}
+                  className="flex items-center justify-between p-4 bg-red-50 rounded-lg border border-red-100"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900 truncate">{item.titulo}</p>
+                      <span className="badge-red text-xs flex-shrink-0">Rechazado</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.plantilla_nombre}</p>
+                    {item.comentario_validacion && (
+                      <p className="text-xs text-red-500 mt-1">Motivo: {item.comentario_validacion}</p>
+                    )}
+                  </div>
+                  <Link
+                    to={`/form/${item.asignacion_id}`}
+                    className="flex items-center flex-shrink-0 ml-3 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                  >
+                    Corregir
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Formularios Completados */}
         <div className="card">

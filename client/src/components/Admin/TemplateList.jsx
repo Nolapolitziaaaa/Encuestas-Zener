@@ -2,12 +2,15 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import templateService from '../../services/templateService';
 import Modal from '../Common/Modal';
-import { Plus, Edit, Trash2, Eye, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, ToggleLeft, ToggleRight, Copy } from 'lucide-react';
 
 export default function TemplateList() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDelete, setShowDelete] = useState(null);
+  const [showDuplicate, setShowDuplicate] = useState(null);
+  const [duplicateName, setDuplicateName] = useState('');
+  const [duplicating, setDuplicating] = useState(false);
 
   useEffect(() => {
     loadTemplates();
@@ -30,6 +33,26 @@ export default function TemplateList() {
       loadTemplates();
     } catch (err) {
       alert('Error: ' + (err.response?.data?.error || err.message));
+    }
+  };
+
+  const handleDuplicate = async (template) => {
+    setShowDuplicate(template);
+    setDuplicateName(template.nombre + ' (copia)');
+  };
+
+  const confirmDuplicate = async () => {
+    if (!duplicateName.trim()) return;
+    setDuplicating(true);
+    try {
+      await templateService.duplicate(showDuplicate.id, duplicateName.trim());
+      setShowDuplicate(null);
+      setDuplicateName('');
+      loadTemplates();
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -112,6 +135,14 @@ export default function TemplateList() {
                   )}
                 </button>
                 <button
+                  onClick={() => handleDuplicate(template)}
+                  className="btn-secondary text-sm py-1.5 px-3 flex items-center"
+                  title="Duplicar"
+                >
+                  <Copy className="w-4 h-4" />
+                  Duplicar
+                </button>
+                <button
                   onClick={() => setShowDelete(template)}
                   className="btn-secondary text-sm py-1.5 px-3 text-red-600 hover:bg-red-50 flex items-center"
                 >
@@ -138,6 +169,41 @@ export default function TemplateList() {
           </button>
           <button onClick={handleDelete} className="flex-1 btn-danger">
             Eliminar
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!showDuplicate}
+        onClose={() => setShowDuplicate(null)}
+        title="Duplicar Plantilla"
+      >
+        <p className="text-gray-600 mb-4">
+          Se creara una copia de <strong>{showDuplicate?.nombre}</strong> con todos sus campos.
+        </p>
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Nombre de la nueva plantilla <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            value={duplicateName}
+            onChange={(e) => setDuplicateName(e.target.value)}
+            className="input w-full"
+            placeholder="Nombre de la plantilla"
+            autoFocus
+          />
+        </div>
+        <div className="flex space-x-3">
+          <button onClick={() => setShowDuplicate(null)} className="flex-1 btn-secondary" disabled={duplicating}>
+            Cancelar
+          </button>
+          <button
+            onClick={confirmDuplicate}
+            disabled={duplicating || !duplicateName.trim()}
+            className="flex-1 btn-primary disabled:opacity-50"
+          >
+            {duplicating ? 'Duplicando...' : 'Confirmar'}
           </button>
         </div>
       </Modal>

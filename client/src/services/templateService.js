@@ -6,6 +6,7 @@ const templateService = {
   create: (data) => api.post('/templates', data).then((r) => r.data),
   update: (id, data) => api.put(`/templates/${id}`, data).then((r) => r.data),
   remove: (id) => api.delete(`/templates/${id}`).then((r) => r.data),
+  duplicate: (id, nombre) => api.post(`/templates/${id}/duplicate`, { nombre }).then((r) => r.data),
 };
 
 export default templateService;

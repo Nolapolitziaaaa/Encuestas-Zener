@@ -1,5 +1,9 @@
 const { pool } = require('../config/postgres');
 const ExcelJS = require('exceljs');
+const path = require('path');
+const fs = require('fs');
+const { execFile } = require('child_process');
+const crypto = require('crypto');
 
 const summary = async (req, res) => {
   try {
@@ -16,7 +20,10 @@ const summary = async (req, res) => {
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE estado = 'completado') as asignaciones_completadas,
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE estado = 'pendiente') as asignaciones_pendientes,
         (SELECT COUNT(*) FROM invitaciones WHERE estado = 'pendiente') as invitaciones_pendientes,
-        (SELECT COUNT(*) FROM invitaciones WHERE estado = 'registrada') as invitaciones_registradas
+        (SELECT COUNT(*) FROM invitaciones WHERE estado = 'registrada') as invitaciones_registradas,
+        (SELECT COUNT(*) FROM respuestas_formulario WHERE estado_validacion = 'validado') as respuestas_validadas,
+        (SELECT COUNT(*) FROM respuestas_formulario WHERE estado_validacion = 'pendiente') as respuestas_pendientes_validacion,
+        (SELECT COUNT(*) FROM respuestas_formulario WHERE estado_validacion = 'rechazado') as respuestas_rechazadas
     `);
 
     // Formularios por plantilla
@@ -260,12 +267,14 @@ const formResponses = async (req, res) => {
     const { id } = req.params;
 
     const respuestasResult = await pool.query(`
-      SELECT rf.id as respuesta_id, rf.fecha_envio,
-             u.id as usuario_id, u.nombre, u.apellido, u.rut, u.email
+      SELECT DISTINCT ON (rf.proveedor_id)
+             rf.id as respuesta_id, rf.fecha_envio,
+             rf.estado_validacion, rf.comentario_validacion,
+             u.id as usuario_id, u.nombre, u.apellido, u.rut, u.email, u.empresa
       FROM respuestas_formulario rf
       JOIN usuarios u ON rf.proveedor_id = u.id
       WHERE rf.formulario_id = $1
-      ORDER BY rf.fecha_envio DESC
+      ORDER BY rf.proveedor_id, rf.id DESC
     `, [id]);
 
     const camposResult = await pool.query(`
@@ -277,35 +286,17 @@ const formResponses = async (req, res) => {
     const respuestas = [];
     for (const resp of respuestasResult.rows) {
       const valoresResult = await pool.query(
-        'SELECT * FROM valores_respuesta WHERE respuesta_id = $1',
+        `SELECT vr.*, cp.etiqueta, cp.tipo as campo_tipo
+         FROM valores_respuesta vr
+         JOIN campos_plantilla cp ON vr.campo_plantilla_id = cp.id
+         WHERE vr.respuesta_id = $1
+         ORDER BY cp.orden`,
         [resp.respuesta_id]
       );
 
-      const valores = {};
-      for (const v of valoresResult.rows) {
-        let display = '';
-        if (v.archivo_url) {
-          display = v.archivo_url;
-        } else if (v.valor_texto) {
-          display = v.valor_texto;
-        } else if (v.valor_numero !== null && v.valor_numero !== undefined) {
-          display = v.valor_numero.toString();
-        } else if (v.valor_fecha) {
-          display = v.valor_fecha;
-        } else if (v.valor_json) {
-          display = v.valor_json;
-        }
-
-        valores[v.campo_plantilla_id] = {
-          raw: v,
-          display,
-          is_file: !!v.archivo_url,
-        };
-      }
-
       respuestas.push({
         ...resp,
-        valores,
+        valores: valoresResult.rows,
       });
     }
 
@@ -321,10 +312,10 @@ const formResponses = async (req, res) => {
 
 const reportByUser = async (req, res) => {
   try {
-    const { form_id, search } = req.query;
+    const { form_id, search, fecha_desde, fecha_hasta } = req.query;
 
     let query = `
-      SELECT u.id as usuario_id, u.nombre, u.apellido, u.rut, u.email,
+      SELECT u.id as usuario_id, u.nombre, u.apellido, u.rut, u.email, u.empresa,
         COUNT(DISTINCT a.id) as total_asignaciones,
         COUNT(DISTINCT CASE WHEN a.estado = 'completado' THEN a.id END) as completados,
         COUNT(DISTINCT CASE WHEN a.estado IN ('pendiente', 'en_progreso') THEN a.id END) as pendientes,
@@ -348,11 +339,23 @@ const reportByUser = async (req, res) => {
 
     if (search) {
       paramCount++;
-      query += ` AND (u.nombre ILIKE $${paramCount} OR u.apellido ILIKE $${paramCount} OR u.rut ILIKE $${paramCount} OR u.email ILIKE $${paramCount})`;
+      query += ` AND (u.nombre ILIKE $${paramCount} OR u.apellido ILIKE $${paramCount} OR u.rut ILIKE $${paramCount} OR u.email ILIKE $${paramCount} OR u.empresa ILIKE $${paramCount})`;
       params.push(`%${search}%`);
     }
 
-    query += ` GROUP BY u.id, u.nombre, u.apellido, u.rut, u.email ORDER BY u.nombre, u.apellido`;
+    if (fecha_desde) {
+      paramCount++;
+      query += ` AND a.fecha_envio >= $${paramCount}`;
+      params.push(fecha_desde);
+    }
+
+    if (fecha_hasta) {
+      paramCount++;
+      query += ` AND a.fecha_envio <= $${paramCount}`;
+      params.push(fecha_hasta);
+    }
+
+    query += ` GROUP BY u.id, u.nombre, u.apellido, u.rut, u.email, u.empresa ORDER BY u.nombre, u.apellido`;
 
     const result = await pool.query(query, params);
     res.json({ usuarios: result.rows });
@@ -364,7 +367,7 @@ const reportByUser = async (req, res) => {
 
 const reportSurveys = async (req, res) => {
   try {
-    const { estado, plantilla_id, search } = req.query;
+    const { estado, plantilla_id, search, fecha_desde, fecha_hasta } = req.query;
 
     let query = `
       SELECT f.id, f.titulo, f.estado, f.fecha_creacion, f.fecha_limite,
@@ -402,6 +405,18 @@ const reportSurveys = async (req, res) => {
       params.push(`%${search}%`);
     }
 
+    if (fecha_desde) {
+      paramCount++;
+      query += ` AND f.fecha_creacion >= $${paramCount}`;
+      params.push(fecha_desde);
+    }
+
+    if (fecha_hasta) {
+      paramCount++;
+      query += ` AND f.fecha_creacion <= $${paramCount}`;
+      params.push(fecha_hasta);
+    }
+
     query += ` ORDER BY f.fecha_creacion DESC`;
 
     const result = await pool.query(query, params);
@@ -420,13 +435,19 @@ const userDetail = async (req, res) => {
              f.id as formulario_id, f.titulo as formulario_titulo,
              p.nombre as plantilla_nombre,
              (SELECT COUNT(*) FROM campos_plantilla cp WHERE cp.plantilla_id = f.plantilla_id) as total_campos,
-             (SELECT COUNT(*) FROM borradores_respuesta br
-              WHERE br.asignacion_id = a.id
-              AND (br.valor_texto IS NOT NULL AND br.valor_texto != ''
-                   OR br.valor_numero IS NOT NULL
-                   OR br.valor_fecha IS NOT NULL
-                   OR br.valor_json IS NOT NULL
-                   OR br.archivo_url IS NOT NULL)) as campos_respondidos
+             CASE WHEN a.estado = 'completado'
+               THEN (SELECT COUNT(*) FROM campos_plantilla cp WHERE cp.plantilla_id = f.plantilla_id)
+               ELSE (SELECT COUNT(*) FROM borradores_respuesta br
+                     WHERE br.asignacion_id = a.id
+                     AND (br.valor_texto IS NOT NULL AND br.valor_texto != ''
+                          OR br.valor_numero IS NOT NULL
+                          OR br.valor_fecha IS NOT NULL
+                          OR br.valor_json IS NOT NULL
+                          OR br.archivo_url IS NOT NULL))
+             END as campos_respondidos,
+             (SELECT rf.id FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as respuesta_id,
+             (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion,
+             (SELECT rf.comentario_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as comentario_validacion
       FROM asignaciones_formulario a
       JOIN formularios f ON a.formulario_id = f.id
       JOIN plantillas p ON f.plantilla_id = p.id
@@ -447,9 +468,24 @@ const formUserStatus = async (req, res) => {
 
     const result = await pool.query(`
       SELECT a.id as asignacion_id, a.estado, a.fecha_respuesta, a.fecha_envio,
-             u.id as usuario_id, u.nombre, u.apellido, u.rut, u.email
+             u.id as usuario_id, u.nombre, u.apellido, u.rut, u.email, u.empresa,
+             (SELECT COUNT(*) FROM campos_plantilla cp WHERE cp.plantilla_id = f.plantilla_id) as total_campos,
+             CASE WHEN a.estado = 'completado'
+               THEN (SELECT COUNT(*) FROM campos_plantilla cp WHERE cp.plantilla_id = f.plantilla_id)
+               ELSE (SELECT COUNT(*) FROM borradores_respuesta br
+                     WHERE br.asignacion_id = a.id
+                     AND (br.valor_texto IS NOT NULL AND br.valor_texto != ''
+                          OR br.valor_numero IS NOT NULL
+                          OR br.valor_fecha IS NOT NULL
+                          OR br.valor_json IS NOT NULL
+                          OR br.archivo_url IS NOT NULL))
+             END as campos_respondidos,
+             (SELECT rf.id FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as respuesta_id,
+             (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion,
+             (SELECT rf.comentario_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as comentario_validacion
       FROM asignaciones_formulario a
       JOIN usuarios u ON a.proveedor_id = u.id
+      JOIN formularios f ON a.formulario_id = f.id
       WHERE a.formulario_id = $1
       ORDER BY
         CASE WHEN a.estado = 'completado' THEN 1
@@ -468,10 +504,17 @@ const formUserStatus = async (req, res) => {
       completados,
       pendientes: total - completados,
       porcentaje,
-      usuarios: result.rows.map(r => ({
-        ...r,
-        respondido: r.estado === 'completado',
-      })),
+      usuarios: result.rows.map(r => {
+        const tc = r.total_campos || 1;
+        const cr = r.campos_respondidos || 0;
+        return {
+          ...r,
+          respondido: r.estado === 'completado',
+          progreso: Math.round((cr / tc) * 100),
+          campos_respondidos: cr,
+          total_campos: tc,
+        };
+      }),
     });
   } catch (err) {
     console.error('Error en formUserStatus:', err);
@@ -479,4 +522,247 @@ const formUserStatus = async (req, res) => {
   }
 };
 
-module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus };
+const previewFile = async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: 'URL requerida' });
+
+    const filename = path.basename(url);
+    const filePath = path.join(__dirname, '..', 'uploads', filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Archivo no encontrado' });
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+
+    // PDF, imágenes y video se sirven directamente
+    const directTypes = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.webm', '.ogg'];
+    if (directTypes.includes(ext)) {
+      return res.json({ type: 'direct', url });
+    }
+
+    // Excel se previsualiza client-side, solo devolver tipo
+    const excelTypes = ['.xlsx', '.xls', '.csv'];
+    if (excelTypes.includes(ext)) {
+      return res.json({ type: 'excel', url });
+    }
+
+    // Word/PPT: convertir a PDF con LibreOffice, guardar en PostgreSQL
+    const convertibleTypes = ['.docx', '.doc', '.pptx', '.ppt'];
+    if (!convertibleTypes.includes(ext)) {
+      return res.json({ type: 'download', url });
+    }
+
+    // Verificar si ya existe en PostgreSQL
+    const cached = await pool.query(
+      'SELECT id FROM preview_cache WHERE original_filename = $1',
+      [filename]
+    );
+
+    if (cached.rows.length > 0) {
+      return res.json({ type: 'pdf', id: cached.rows[0].id, filename });
+    }
+
+    // Convertir con LibreOffice a archivo temporal
+    const tmpDir = '/tmp/preview_convert';
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    const pdfTmpPath = path.join(tmpDir, path.basename(filename, ext) + '.pdf');
+
+    await new Promise((resolve, reject) => {
+      execFile('libreoffice', [
+        '--headless', '--convert-to', 'pdf',
+        '--outdir', tmpDir,
+        filePath,
+      ], { timeout: 60000 }, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+
+    if (!fs.existsSync(pdfTmpPath)) {
+      return res.status(500).json({ error: 'No se pudo convertir el archivo' });
+    }
+
+    // Leer PDF y guardar en PostgreSQL
+    const pdfBuffer = fs.readFileSync(pdfTmpPath);
+    fs.unlinkSync(pdfTmpPath); // limpiar temporal
+
+    const result = await pool.query(
+      'INSERT INTO preview_cache (original_filename, pdf_data) VALUES ($1, $2) ON CONFLICT (original_filename) DO UPDATE SET pdf_data = EXCLUDED.pdf_data, created_at = NOW() RETURNING id',
+      [filename, pdfBuffer]
+    );
+
+    return res.json({ type: 'pdf', id: result.rows[0].id, filename });
+  } catch (err) {
+    console.error('Error en previewFile:', err);
+    res.status(500).json({ error: 'Error al previsualizar' });
+  }
+};
+
+const previewServe = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT original_filename, pdf_data FROM preview_cache WHERE id = $1',
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Vista previa no encontrada' });
+    }
+
+    const row = result.rows[0];
+    const originalName = path.basename(row.original_filename, path.extname(row.original_filename)) + '.pdf';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(row.pdf_data);
+  } catch (err) {
+    console.error('Error en previewServe:', err);
+    res.status(500).json({ error: 'Error al servir vista previa' });
+  }
+};
+
+const reportByCompany = async (req, res) => {
+  try {
+    const { search, fecha_desde, fecha_hasta } = req.query;
+
+    let query = `
+      SELECT COALESCE(u.empresa, 'Sin empresa') as empresa,
+        COUNT(DISTINCT u.id) as total_proveedores,
+        COUNT(DISTINCT a.id) as total_asignaciones,
+        COUNT(DISTINCT CASE WHEN a.estado = 'completado' THEN a.id END) as completados,
+        COUNT(DISTINCT CASE WHEN a.estado IN ('pendiente', 'en_progreso') THEN a.id END) as pendientes,
+        COUNT(DISTINCT CASE WHEN a.estado = 'vencido' THEN a.id END) as vencidos,
+        ROUND(
+          COUNT(DISTINCT CASE WHEN a.estado = 'completado' THEN a.id END)::numeric /
+          NULLIF(COUNT(DISTINCT a.id), 0) * 100, 1
+        ) as porcentaje_completado
+      FROM usuarios u
+      LEFT JOIN asignaciones_formulario a ON a.proveedor_id = u.id
+      WHERE u.rol = 'usuario'
+    `;
+    const params = [];
+    let paramCount = 0;
+
+    if (search) {
+      paramCount++;
+      query += ` AND u.empresa ILIKE $${paramCount}`;
+      params.push(`%${search}%`);
+    }
+    if (fecha_desde) {
+      paramCount++;
+      query += ` AND a.fecha_envio >= $${paramCount}`;
+      params.push(fecha_desde);
+    }
+    if (fecha_hasta) {
+      paramCount++;
+      query += ` AND a.fecha_envio <= $${paramCount}`;
+      params.push(fecha_hasta);
+    }
+
+    query += ` GROUP BY COALESCE(u.empresa, 'Sin empresa') ORDER BY completados DESC, empresa`;
+
+    const result = await pool.query(query, params);
+    res.json({ empresas: result.rows });
+  } catch (err) {
+    console.error('Error en reporte por empresa:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const exportAll = async (req, res) => {
+  try {
+    const { estado, plantilla_id, search, fecha_desde, fecha_hasta, format = 'xlsx' } = req.query;
+
+    let query = `
+      SELECT f.id, f.titulo, f.estado, f.fecha_creacion, f.fecha_limite,
+        p.nombre as plantilla_nombre,
+        (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id) as total_asignados,
+        (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'completado') as completados,
+        (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado IN ('pendiente', 'en_progreso')) as en_progreso,
+        (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'vencido') as vencidos,
+        ROUND(
+          (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'completado')::numeric /
+          NULLIF((SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id), 0) * 100, 1
+        ) as porcentaje_completado
+      FROM formularios f
+      JOIN plantillas p ON f.plantilla_id = p.id
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 0;
+
+    if (estado) {
+      paramCount++;
+      query += ` AND f.estado = $${paramCount}`;
+      params.push(estado);
+    }
+    if (plantilla_id) {
+      paramCount++;
+      query += ` AND f.plantilla_id = $${paramCount}`;
+      params.push(parseInt(plantilla_id));
+    }
+    if (search) {
+      paramCount++;
+      query += ` AND f.titulo ILIKE $${paramCount}`;
+      params.push(`%${search}%`);
+    }
+    if (fecha_desde) {
+      paramCount++;
+      query += ` AND f.fecha_creacion >= $${paramCount}`;
+      params.push(fecha_desde);
+    }
+    if (fecha_hasta) {
+      paramCount++;
+      query += ` AND f.fecha_creacion <= $${paramCount}`;
+      params.push(fecha_hasta);
+    }
+
+    query += ` ORDER BY f.fecha_creacion DESC`;
+    const formsResult = await pool.query(query, params);
+
+    if (format === 'csv') {
+      const headers = ['Formulario', 'Plantilla', 'Estado', 'Creado', 'Limite', 'Asignados', 'Completados', 'En Progreso', 'Vencidos', '% Avance'];
+      const rows = [headers.join(';')];
+      for (const f of formsResult.rows) {
+        rows.push([f.titulo, f.plantilla_nombre, f.estado, f.fecha_creacion, f.fecha_limite || '',
+          f.total_asignados, f.completados, f.en_progreso, f.vencidos, f.porcentaje_completado + '%'].join(';'));
+      }
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="reporte_encuestas.csv"');
+      res.send('\ufeff' + rows.join('\n'));
+      return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet('Resumen Encuestas');
+
+    // Header
+    ws.addRow(['Formulario', 'Plantilla', 'Estado', 'Fecha Creación', 'Fecha Límite', 'Asignados', 'Completados', 'En Progreso', 'Vencidos', '% Avance']);
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF232856' } };
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+    for (const f of formsResult.rows) {
+      ws.addRow([f.titulo, f.plantilla_nombre, f.estado,
+        f.fecha_creacion ? new Date(f.fecha_creacion).toLocaleDateString('es-CL') : '',
+        f.fecha_limite ? new Date(f.fecha_limite).toLocaleDateString('es-CL') : '',
+        f.total_asignados, f.completados, f.en_progreso, f.vencidos, f.porcentaje_completado + '%']);
+    }
+
+    ws.columns.forEach((col) => { col.width = 18; });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="reporte_encuestas.xlsx"');
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Error exportando todo:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll };

@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { LayoutDashboard, FileText, Users, BarChart3, Mail, ClipboardList, ChevronDown, ChevronRight, List } from 'lucide-react';
+import { LayoutDashboard, FileText, Users, BarChart3, ClipboardList, ChevronDown, ChevronRight, List } from 'lucide-react';
 
 const adminLinks = [
   { to: '/admin', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/admin/templates', icon: FileText, label: 'Plantillas' },
   { to: '/admin/forms', icon: ClipboardList, label: 'Formularios' },
-  { to: '/admin/invitations', icon: Mail, label: 'Invitaciones' },
   { to: '/admin/users', icon: Users, label: 'Usuarios' },
 ];
 

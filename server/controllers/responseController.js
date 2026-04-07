@@ -12,7 +12,7 @@ const submit = async (req, res) => {
       `SELECT a.*, f.plantilla_id, f.titulo as formulario_titulo
        FROM asignaciones_formulario a
        JOIN formularios f ON a.formulario_id = f.id
-       WHERE a.id = $1 AND a.proveedor_id = $2 AND a.estado IN ('pendiente', 'en_progreso')`,
+       WHERE a.id = $1 AND a.proveedor_id = $2 AND a.estado IN ('pendiente', 'en_progreso', 'completado')`,
       [id, req.user.id]
     );
 
@@ -53,13 +53,31 @@ const submit = async (req, res) => {
     // Borrar borradores
     await client.query('DELETE FROM borradores_respuesta WHERE asignacion_id = $1', [id]);
 
-    const responseResult = await client.query(
-      `INSERT INTO respuestas_formulario (asignacion_id, formulario_id, proveedor_id)
-       VALUES ($1, $2, $3) RETURNING id`,
-      [id, assignment.formulario_id, req.user.id]
+    // Verificar si ya existe una respuesta (rechazada) para esta asignación
+    const existingResponse = await client.query(
+      `SELECT id FROM respuestas_formulario WHERE asignacion_id = $1 LIMIT 1`,
+      [id]
     );
 
-    const respuestaId = responseResult.rows[0].id;
+    let respuestaId;
+    if (existingResponse.rows.length > 0) {
+      // Actualizar respuesta existente
+      respuestaId = existingResponse.rows[0].id;
+      await client.query(
+        `UPDATE respuestas_formulario SET fecha_envio = CURRENT_TIMESTAMP, estado_validacion = 'pendiente', comentario_validacion = NULL WHERE id = $1`,
+        [respuestaId]
+      );
+      // Borrar valores viejos
+      await client.query('DELETE FROM valores_respuesta WHERE respuesta_id = $1', [respuestaId]);
+    } else {
+      // Crear nueva respuesta
+      const responseResult = await client.query(
+        `INSERT INTO respuestas_formulario (asignacion_id, formulario_id, proveedor_id)
+         VALUES ($1, $2, $3) RETURNING id`,
+        [id, assignment.formulario_id, req.user.id]
+      );
+      respuestaId = responseResult.rows[0].id;
+    }
 
     if (Array.isArray(valores)) {
       for (const valor of valores) {
@@ -101,6 +119,28 @@ const submit = async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Crear notificacion para admins (fuera de la transaccion, no bloquea la respuesta)
+    const proveedorResult = await pool.query(
+      'SELECT nombre, apellido, empresa FROM usuarios WHERE id = $1',
+      [req.user.id]
+    );
+    const proveedor = proveedorResult.rows[0];
+    const nombreCompleto = `${proveedor.nombre || ''} ${proveedor.apellido || ''}`.trim();
+    await pool.query(
+      `INSERT INTO notificaciones (tipo, titulo, mensaje, formulario_id, respuesta_id, proveedor_id, proveedor_nombre, proveedor_empresa)
+       VALUES ('respuesta', 'Nueva respuesta recibida', $1, $2, $3, $4, $5, $6)`,
+      [
+        `${nombreCompleto} respondio el formulario "${assignment.formulario_titulo}"`,
+        assignment.formulario_id,
+        respuestaId,
+        req.user.id,
+        nombreCompleto,
+        proveedor.empresa || null,
+      ]
+    ).catch((notifErr) => {
+      console.error('Error creando notificacion:', notifErr.message);
+    });
+
     res.json({
       message: 'Respuesta enviada correctamente',
       respuesta_id: respuestaId,
@@ -122,8 +162,11 @@ const saveDraft = async (req, res) => {
     const { valores } = req.body;
 
     const assignmentResult = await client.query(
-      `SELECT a.* FROM asignaciones_formulario a
-       WHERE a.id = $1 AND a.proveedor_id = $2 AND a.estado IN ('pendiente', 'en_progreso')`,
+      `SELECT a.*,
+              (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion
+       FROM asignaciones_formulario a
+       WHERE a.id = $1 AND a.proveedor_id = $2
+       AND (a.estado IN ('pendiente', 'en_progreso') OR (a.estado = 'completado' AND (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) = 'rechazado'))`,
       [id, req.user.id]
     );
 
@@ -292,4 +335,87 @@ const getMyResponse = async (req, res) => {
   }
 };
 
-module.exports = { submit, getFormResponses, getMyResponse, saveDraft, loadDraft };
+const validateResponse = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `UPDATE respuestas_formulario
+       SET estado_validacion = 'validado'
+       WHERE id = $1 RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Respuesta no encontrada' });
+    }
+
+    res.json({ message: 'Respuesta validada correctamente' });
+  } catch (err) {
+    console.error('Error validando respuesta:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const rejectResponse = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { comentario } = req.body;
+
+    if (!comentario || !comentario.trim()) {
+      return res.status(400).json({ error: 'El comentario de rechazo es requerido' });
+    }
+
+    await client.query('BEGIN');
+
+    const responseResult = await client.query(
+      `SELECT rf.*, u.nombre, u.apellido, u.email, f.titulo as formulario_titulo,
+              a.id as asignacion_id, a.formulario_id
+       FROM respuestas_formulario rf
+       JOIN usuarios u ON rf.proveedor_id = u.id
+       JOIN formularios f ON rf.formulario_id = f.id
+       JOIN asignaciones_formulario a ON rf.asignacion_id = a.id
+       WHERE rf.id = $1`,
+      [id]
+    );
+
+    if (responseResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Respuesta no encontrada' });
+    }
+
+    const responseData = responseResult.rows[0];
+
+    await client.query(
+      `UPDATE respuestas_formulario
+       SET estado_validacion = 'rechazado', comentario_validacion = $1
+       WHERE id = $2`,
+      [comentario.trim(), id]
+    );
+
+    await client.query('COMMIT');
+
+    // Enviar email sin bloquear la respuesta HTTP
+    const { sendRejectionEmail } = require('../services/emailService');
+    sendRejectionEmail(
+      responseData.nombre,
+      responseData.apellido,
+      responseData.email,
+      responseData.formulario_titulo,
+      comentario.trim()
+    ).catch((emailErr) => {
+      console.error('Error enviando email de rechazo:', emailErr.message);
+    });
+
+    res.json({ message: 'Respuesta rechazada correctamente' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error rechazando respuesta:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { submit, getFormResponses, getMyResponse, saveDraft, loadDraft, validateResponse, rejectResponse };

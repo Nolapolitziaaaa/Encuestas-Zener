@@ -9,7 +9,10 @@ const reportService = {
     api.get(`/reports/export/${id}`, { params: { format }, responseType: 'blob' }).then((r) => r.data),
   reportByUser: (params) => api.get('/reports/users', { params }).then((r) => r.data),
   reportSurveys: (params) => api.get('/reports/surveys', { params }).then((r) => r.data),
+  reportByCompany: (params) => api.get('/reports/companies', { params }).then((r) => r.data),
   userDetail: (userId) => api.get(`/reports/user/${userId}/detail`).then((r) => r.data),
+  exportAll: (params, format = 'xlsx') =>
+    api.get('/reports/export-all', { params: { ...params, format }, responseType: 'blob' }).then((r) => r.data),
 };
 
 export default reportService;

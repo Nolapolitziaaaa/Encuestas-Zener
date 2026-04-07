@@ -48,7 +48,8 @@ const list = async (req, res) => {
 
 const create = async (req, res) => {
   try {
-    const { nombre, apellido, rut, email } = req.body;
+    const { nombre, apellido, rut, email, rol, empresa } = req.body;
+    const userRol = rol === 'admin' ? 'admin' : 'usuario';
 
     if (!nombre || !rut || !email) {
       return res.status(400).json({ error: 'Nombre, RUT y email son requeridos' });
@@ -65,17 +66,15 @@ const create = async (req, res) => {
 
     const token = uuidv4();
     const result = await pool.query(
-      `INSERT INTO invitaciones (nombre, apellido, rut, email, token, invitado_por)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [nombre, apellido || '', rut, email, token, req.user.id]
+      `INSERT INTO invitaciones (nombre, apellido, rut, email, token, invitado_por, rol, empresa)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [nombre, apellido || '', rut, email, token, req.user.id, userRol, empresa || '']
     );
 
-    try {
-      await sendInvitationEmail(`${nombre} ${apellido || ''}`.trim(), email, token);
-    } catch (emailErr) {
+    // Enviar email sin bloquear la respuesta HTTP
+    sendInvitationEmail(`${nombre} ${apellido || ''}`.trim(), email, token, userRol).catch((emailErr) => {
       console.error('Error enviando email:', emailErr.message);
-      // No fallar si el email no se envía
-    }
+    });
 
     res.status(201).json(result.rows[0]);
   } catch (err) {
@@ -95,8 +94,8 @@ const createBulk = async (req, res) => {
     const results = { created: 0, skipped: 0, errors: [] };
 
     for (const inv of invitations) {
-      if (!inv.nombre || !inv.rut || !inv.email) {
-        results.errors.push({ email: inv.email, error: 'Campos incompletos' });
+      if (!inv.nombre || !inv.rut || !inv.email || !inv.empresa) {
+        results.errors.push({ email: inv.email, error: 'Campos incompletos (nombre, RUT, email, empresa son requeridos)' });
         results.skipped++;
         continue;
       }
@@ -111,20 +110,21 @@ const createBulk = async (req, res) => {
         continue;
       }
 
+      const userRol = 'usuario';
       const token = uuidv4();
       await pool.query(
-        `INSERT INTO invitaciones (nombre, apellido, rut, email, token, invitado_por)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [inv.nombre, inv.apellido || '', inv.rut, inv.email, token, req.user.id]
+        `INSERT INTO invitaciones (nombre, apellido, rut, email, token, invitado_por, rol, empresa)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [inv.nombre, inv.apellido || '', inv.rut, inv.email, token, req.user.id, userRol, inv.empresa || '']
       );
 
-      try {
-        await sendInvitationEmail(`${inv.nombre} ${inv.apellido || ''}`.trim(), inv.email, token);
-      } catch (emailErr) {
-        console.error(`Error enviando email a ${inv.email}:`, emailErr.message);
-      }
-
       results.created++;
+
+      // Enviar email sin bloquear
+      const invNombre = `${inv.nombre} ${inv.apellido || ''}`.trim();
+      sendInvitationEmail(invNombre, inv.email, token, userRol).catch((emailErr) => {
+        console.error(`Error enviando email a ${inv.email}:`, emailErr.message);
+      });
     }
 
     res.status(201).json(results);
@@ -154,4 +154,26 @@ const remove = async (req, res) => {
   }
 };
 
-module.exports = { list, create, createBulk, remove };
+const update = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nombre, apellido, email, empresa } = req.body;
+
+    const result = await pool.query(
+      `UPDATE invitaciones SET nombre = $1, apellido = $2, email = $3, empresa = $4
+       WHERE id = $5 RETURNING *`,
+      [nombre, apellido || '', email, empresa || '', id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Invitación no encontrada' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error actualizando invitación:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { list, create, createBulk, remove, update };

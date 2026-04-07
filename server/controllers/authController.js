@@ -62,6 +62,7 @@ const login = async (req, res) => {
         apellido: user.apellido,
         email: user.email,
         rol: user.rol,
+        empresa: user.empresa,
       },
       accessToken,
       refreshToken,
@@ -94,6 +95,7 @@ const register = async (req, res) => {
     }
 
     const invitation = invitationResult.rows[0];
+    const userRol = invitation.rol === 'admin' ? 'admin' : 'usuario';
 
     const existingUser = await client.query(
       'SELECT id FROM usuarios WHERE rut = $1 OR email = $2',
@@ -113,9 +115,9 @@ const register = async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const userResult = await client.query(
-      `INSERT INTO usuarios (rut, password_hash, nombre, apellido, email, rol)
-       VALUES ($1, $2, $3, $4, $5, 'usuario') RETURNING id, rut, nombre, apellido, email, rol`,
-      [invitation.rut, passwordHash, invitation.nombre, invitation.apellido, invitation.email]
+      `INSERT INTO usuarios (rut, password_hash, nombre, apellido, email, rol, empresa)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, rut, nombre, apellido, email, rol, empresa`,
+      [invitation.rut, passwordHash, invitation.nombre, invitation.apellido, invitation.email, userRol, invitation.empresa || '']
     );
 
     await client.query(
@@ -225,7 +227,7 @@ const logout = async (req, res) => {
 const me = async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, rut, nombre, apellido, email, rol, fecha_registro, ultimo_acceso
+      `SELECT id, rut, nombre, apellido, email, rol, fecha_registro, ultimo_acceso, empresa
        FROM usuarios WHERE id = $1`,
       [req.user.id]
     );
@@ -303,6 +305,167 @@ const changePassword = async (req, res) => {
   }
 };
 
+const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: 'El email es requerido' });
+    }
+
+    const userResult = await pool.query(
+      'SELECT id, nombre, apellido, email FROM usuarios WHERE email = $1',
+      [email]
+    );
+
+    if (userResult.rows.length > 0) {
+      const user = userResult.rows[0];
+      const { v4: uuidv4 } = require('uuid');
+      const token = uuidv4();
+
+      await pool.query(
+        `INSERT INTO reset_tokens (usuario_id, token, expires_at)
+         VALUES ($1, $2, NOW() + INTERVAL '24 hours')
+         ON CONFLICT (usuario_id) DO UPDATE SET token = $2, expires_at = NOW() + INTERVAL '24 hours', usado = false`,
+        [user.id, token]
+      );
+
+      const { sendResetEmail } = require('../services/emailService');
+      await sendResetEmail(user.nombre, user.apellido, user.email, token);
+    }
+
+    res.json({ message: 'Si el email está registrado, recibirás un correo para restablecer tu contraseña' });
+  } catch (err) {
+    console.error('Error en forgot password:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const userResult = await pool.query(
+      'SELECT id, nombre, apellido, email FROM usuarios WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const user = userResult.rows[0];
+    const { v4: uuidv4 } = require('uuid');
+    const token = uuidv4();
+
+    await pool.query(
+      `INSERT INTO reset_tokens (usuario_id, token, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '24 hours')
+       ON CONFLICT (usuario_id) DO UPDATE SET token = $2, expires_at = NOW() + INTERVAL '24 hours', usado = false`,
+      [userId, token]
+    );
+
+    const { sendResetEmail } = require('../services/emailService');
+    await sendResetEmail(user.nombre, user.apellido, user.email, token);
+
+    res.json({ message: 'Correo de restablecimiento enviado' });
+  } catch (err) {
+    console.error('Error enviando reset:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const sendAdminInvite = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const userResult = await pool.query(
+      'SELECT id, nombre, apellido, email, rut FROM usuarios WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const user = userResult.rows[0];
+    const { v4: uuidv4 } = require('uuid');
+    const token = uuidv4();
+
+    await pool.query(
+      `INSERT INTO reset_tokens (usuario_id, token, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '24 hours')
+       ON CONFLICT (usuario_id) DO UPDATE SET token = $2, expires_at = NOW() + INTERVAL '24 hours', usado = false`,
+      [userId, token]
+    );
+
+    const { sendAdminInvitationEmail } = require('../services/emailService');
+    await sendAdminInvitationEmail(user.nombre, user.apellido, user.email, token, 'admin123');
+
+    res.json({ message: 'Invitación de administrador enviada' });
+  } catch (err) {
+    console.error('Error enviando invitación admin:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const verifyResetToken = async (req, res) => {
+  try {
+    const { token } = req.params;
+
+    const result = await pool.query(
+      `SELECT rt.usuario_id, u.nombre, u.apellido, u.rut
+       FROM reset_tokens rt JOIN usuarios u ON u.id = rt.usuario_id
+       WHERE rt.token = $1 AND rt.expires_at > NOW() AND rt.usado = false`,
+      [token]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Token inválido o expirado' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error verificando reset token:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const setNewPassword = async (req, res) => {
+  try {
+    const { token, password } = req.body;
+
+    if (!token || !password) {
+      return res.status(400).json({ error: 'Token y contraseña son requeridos' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+
+    const tokenResult = await pool.query(
+      'SELECT usuario_id FROM reset_tokens WHERE token = $1 AND expires_at > NOW() AND usado = false',
+      [token]
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Token inválido o expirado' });
+    }
+
+    const userId = tokenResult.rows[0].usuario_id;
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await pool.query('UPDATE usuarios SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
+    await pool.query('UPDATE reset_tokens SET usado = true WHERE token = $1', [token]);
+    await pool.query('DELETE FROM refresh_tokens WHERE usuario_id = $1', [userId]);
+
+    res.json({ message: 'Contraseña actualizada correctamente' });
+  } catch (err) {
+    console.error('Error estableciendo nueva contraseña:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
 module.exports = {
   login,
   register,
@@ -311,4 +474,9 @@ module.exports = {
   logout,
   me,
   changePassword,
+  forgotPassword,
+  resetPassword,
+  sendAdminInvite,
+  verifyResetToken,
+  setNewPassword,
 };

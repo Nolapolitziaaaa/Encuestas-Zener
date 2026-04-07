@@ -20,6 +20,8 @@ CREATE TABLE usuarios (
   email VARCHAR(255) UNIQUE NOT NULL,
   rol rol_type NOT NULL DEFAULT 'usuario',
   activo BOOLEAN NOT NULL DEFAULT true,
+  empresa VARCHAR(200),
+  respondedor VARCHAR(200),
   fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   ultimo_acceso TIMESTAMP
 );
@@ -39,7 +41,10 @@ CREATE TABLE invitaciones (
   email VARCHAR(255) NOT NULL,
   token UUID NOT NULL DEFAULT gen_random_uuid(),
   estado estado_invitacion NOT NULL DEFAULT 'pendiente',
+  rol rol_type NOT NULL DEFAULT 'usuario',
   invitado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+  empresa VARCHAR(200),
+  respondedor VARCHAR(200),
   fecha_invitacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   fecha_registro TIMESTAMP
 );

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import formService from '../services/formService';
 import DynamicForm, { useFileUpload } from '../components/Common/DynamicForm';
-import { ClipboardList, Check, AlertTriangle, ArrowLeft, Clock, Save } from 'lucide-react';
+import { ClipboardList, Check, AlertTriangle, ArrowLeft, Clock, Save, XCircle } from 'lucide-react';
 
 export default function FillForm() {
   const { asignacionId } = useParams();
@@ -13,6 +13,8 @@ export default function FillForm() {
   const [formulario, setFormulario] = useState(null);
   const [campos, setCampos] = useState([]);
   const [values, setValues] = useState({});
+  const [rechazado, setRechazado] = useState(false);
+  const [comentarioRechazo, setComentarioRechazo] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -29,22 +31,24 @@ export default function FillForm() {
       const response = await api.get(`/forms/assignment/${asignacionId}`);
       const data = response.data;
 
-      if (data.asignacion_estado !== 'pendiente' && data.asignacion_estado !== 'en_progreso') {
-        setError('Este formulario ya no está disponible');
-        return;
-      }
-
       setFormulario(data);
       setCampos(data.campos || []);
 
-      // Load draft if exists
-      try {
-        const draft = await formService.loadDraft(asignacionId);
-        if (draft.valores && Object.keys(draft.valores).length > 0) {
-          setValues(draft.valores);
+      if (data.rechazado) {
+        setRechazado(true);
+        setComentarioRechazo(data.comentario_validacion || '');
+        if (data.valores_previos && Object.keys(data.valores_previos).length > 0) {
+          setValues(data.valores_previos);
         }
-      } catch (draftErr) {
-        // No draft found, start fresh
+      } else {
+        try {
+          const draft = await formService.loadDraft(asignacionId);
+          if (draft.valores && Object.keys(draft.valores).length > 0) {
+            setValues(draft.valores);
+          }
+        } catch (draftErr) {
+          // No draft found, start fresh
+        }
       }
     } catch (err) {
       setError(err.response?.data?.error || 'Error al cargar el formulario');
@@ -174,6 +178,20 @@ export default function FillForm() {
 
       {/* Main content */}
       <main className="max-w-[800px] mx-auto px-4 py-8">
+        {/* Rejection banner */}
+        {rechazado && (
+          <div className="bg-red-50 border border-red-200 rounded-lg mb-6 p-4 flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-red-700">Tu respuesta fue rechazada</p>
+              {comentarioRechazo && (
+                <p className="text-sm text-red-600 mt-1">Motivo: {comentarioRechazo}</p>
+              )}
+              <p className="text-xs text-red-500 mt-1.5">Por favor corrige los campos necesarios y vuelve a enviar.</p>
+            </div>
+          </div>
+        )}
+
         {/* Title card */}
         <div className="bg-white border border-[#e2e8f0] rounded-lg mb-0">
           <div className="px-8 pt-8 pb-6">

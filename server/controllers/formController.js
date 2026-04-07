@@ -208,7 +208,9 @@ const getMyCompleted = async (req, res) => {
     const result = await pool.query(
       `SELECT a.id as asignacion_id, a.fecha_respuesta,
               f.id as formulario_id, f.titulo, f.descripcion,
-              p.nombre as plantilla_nombre
+              p.nombre as plantilla_nombre,
+              (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion,
+              (SELECT rf.comentario_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as comentario_validacion
        FROM asignaciones_formulario a
        JOIN formularios f ON a.formulario_id = f.id
        JOIN plantillas p ON f.plantilla_id = p.id
@@ -251,7 +253,9 @@ const getByAssignment = async (req, res) => {
     const result = await pool.query(
       `SELECT a.id as asignacion_id, a.estado as asignacion_estado,
               f.id as formulario_id, f.titulo, f.descripcion, f.estado, f.fecha_limite as formulario_fecha_limite,
-              p.nombre as plantilla_nombre, p.descripcion as plantilla_descripcion
+              p.nombre as plantilla_nombre, p.descripcion as plantilla_descripcion,
+              (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion,
+              (SELECT rf.comentario_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as comentario_validacion
        FROM asignaciones_formulario a
        JOIN formularios f ON a.formulario_id = f.id
        JOIN plantillas p ON f.plantilla_id = p.id
@@ -264,8 +268,9 @@ const getByAssignment = async (req, res) => {
     }
 
     const form = result.rows[0];
+    const isRejected = form.asignacion_estado === 'completado' && form.estado_validacion === 'rechazado';
 
-    if (form.asignacion_estado !== 'pendiente' && form.asignacion_estado !== 'en_progreso') {
+    if (form.asignacion_estado !== 'pendiente' && form.asignacion_estado !== 'en_progreso' && !isRejected) {
       return res.status(400).json({ error: 'Esta asignación ya no está disponible' });
     }
 
@@ -276,9 +281,36 @@ const getByAssignment = async (req, res) => {
       [form.formulario_id]
     );
 
+    // Si fue rechazado, cargar los valores previos de la respuesta
+    let valoresPrevios = null;
+    if (isRejected) {
+      const respResult = await pool.query(
+        `SELECT rf.id as respuesta_id FROM respuestas_formulario rf WHERE rf.asignacion_id = $1 ORDER BY rf.id DESC LIMIT 1`,
+        [id]
+      );
+      if (respResult.rows.length > 0) {
+        const valoresResult = await pool.query(
+          `SELECT campo_plantilla_id, valor_texto, valor_numero, valor_fecha, valor_json, archivo_url
+           FROM valores_respuesta WHERE respuesta_id = $1`,
+          [respResult.rows[0].respuesta_id]
+        );
+        valoresPrevios = {};
+        for (const v of valoresResult.rows) {
+          const cid = v.campo_plantilla_id;
+          if (v.archivo_url) valoresPrevios[cid] = v.archivo_url;
+          else if (v.valor_json) valoresPrevios[cid] = v.valor_json;
+          else if (v.valor_numero !== null && v.valor_numero !== undefined) valoresPrevios[cid] = v.valor_numero;
+          else if (v.valor_fecha) valoresPrevios[cid] = v.valor_fecha;
+          else if (v.valor_texto) valoresPrevios[cid] = v.valor_texto;
+        }
+      }
+    }
+
     res.json({
       ...form,
       campos: camposResult.rows,
+      rechazado: isRejected,
+      valores_previos: valoresPrevios,
     });
   } catch (err) {
     console.error('Error obteniendo formulario por asignación:', err);

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import { ClipboardList, Eye, EyeOff } from 'lucide-react';
+import api from '../services/api';
+import { ClipboardList, Eye, EyeOff, Mail } from 'lucide-react';
 
 export default function Login() {
   const { login } = useAuth();
@@ -11,6 +12,11 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotError, setForgotError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,6 +41,24 @@ export default function Login() {
       setError(msg);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setForgotError('');
+    if (!forgotEmail) {
+      setForgotError('El email es requerido');
+      return;
+    }
+    setForgotLoading(true);
+    try {
+      await api.post('/auth/forgot-password', { email: forgotEmail });
+      setForgotSent(true);
+    } catch (err) {
+      setForgotError(err.response?.data?.error || 'Error al enviar correo');
+    } finally {
+      setForgotLoading(false);
     }
   };
 
@@ -99,12 +123,90 @@ export default function Login() {
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
           </form>
+
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => { setShowForgot(true); setForgotSent(false); setForgotError(''); setForgotEmail(''); }}
+              className="text-sm text-primary-600 hover:text-primary-800 font-medium"
+            >
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
         </div>
 
         <p className="text-center text-primary-300 text-sm mt-6">
           Zener Chile &copy; {new Date().getFullYear()}
         </p>
       </div>
+
+      {showForgot && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md">
+            {!forgotSent ? (
+              <>
+                <div className="text-center mb-6">
+                  <div className="inline-flex items-center justify-center w-12 h-12 bg-primary-100 rounded-full mb-3">
+                    <Mail className="w-6 h-6 text-primary-600" />
+                  </div>
+                  <h2 className="text-xl font-semibold text-gray-900">Restablecer Contraseña</h2>
+                  <p className="text-gray-500 text-sm mt-1">Ingresa tu email y te enviaremos un enlace para restablecer tu contraseña</p>
+                </div>
+
+                {forgotError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                    {forgotError}
+                  </div>
+                )}
+
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <div>
+                    <label className="label">Email</label>
+                    <input
+                      type="email"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder="correo@ejemplo.com"
+                      className="input"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgot(false)}
+                      className="flex-1 btn-secondary"
+                    >
+                      Volver
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="flex-1 btn-primary"
+                    >
+                      {forgotLoading ? 'Enviando...' : 'Enviar'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <div className="text-center">
+                <div className="inline-flex items-center justify-center w-12 h-12 bg-green-100 rounded-full mb-3">
+                  <Mail className="w-6 h-6 text-green-600" />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-900">Correo Enviado</h2>
+                <p className="text-gray-500 text-sm mt-2">Si el email está registrado en el sistema, recibirás un correo con instrucciones para restablecer tu contraseña.</p>
+                <button
+                  onClick={() => setShowForgot(false)}
+                  className="btn-primary mt-6 px-8"
+                >
+                  Volver al Login
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
