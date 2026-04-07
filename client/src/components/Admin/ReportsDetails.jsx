@@ -770,81 +770,107 @@ export default function ReportsDetails() {
       {/* TAB: POR EMPRESA */}
       {activeTab === 'empresas' && (
         <div>
-          <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <StatsCard label="Empresas" value={empresas.length} icon={Building2} color="blue" />
+            <StatsCard label="Aprobados" value={empresas.reduce((s, e) => s + parseInt(e.aprobados || 0), 0)} icon={CheckCircle} color="green" />
+            <StatsCard label="Pendientes" value={empresas.reduce((s, e) => s + (parseInt(e.pendientes || 0) + parseInt(e.vencidos || 0)), 0)} icon={Clock} color="yellow" />
+            <StatsCard label="Total Proveedores" value={empresas.reduce((s, e) => s + parseInt(e.total_proveedores || 0), 0)} icon={UserCheck} color="purple" />
+          </div>
+
+          {/* Filtro */}
+          <div className="flex flex-wrap items-center gap-3 mb-5">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input type="text" placeholder="Buscar empresa..." value={companySearch} onChange={(e) => setCompanySearch(e.target.value)} className="input pl-9 pr-4 w-full" />
             </div>
           </div>
 
-          <div className="card">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="text-left py-3 px-4 text-gray-600 font-medium">Empresa</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Proveedores</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Total Asign.</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Completados</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Pendientes</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Vencidos</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">% Avance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {empresas.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-8 text-gray-400">Sin resultados</td></tr>
-                  ) : empresas.map((emp) => (
-                    <tr key={emp.empresa} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
-                            <Building2 className="w-4 h-4" />
-                          </div>
-                          <span className="font-medium text-gray-900">{emp.empresa}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 text-center">{emp.total_proveedores}</td>
-                      <td className="py-3 px-4 text-center">{emp.total_asignaciones}</td>
-                      <td className="py-3 px-4 text-center text-green-600 font-medium">{emp.completados}</td>
-                      <td className="py-3 px-4 text-center text-yellow-600">{emp.pendientes}</td>
-                      <td className="py-3 px-4 text-center text-red-500">{emp.vencidos}</td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                            <div className="h-full bg-[#7095B4] rounded-full transition-all" style={{ width: `${emp.porcentaje_completado || 0}%` }} />
-                          </div>
-                          <span className="text-xs font-semibold text-[#7095B4]">{emp.porcentaje_completado || 0}%</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Tarjetas de empresas */}
+          {empresas.length === 0 ? (
+            <div className="card py-12 text-center text-gray-400">
+              <Building2 className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+              <p className="text-sm">No se encontraron empresas</p>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {empresas.map((emp) => {
+                const total = parseInt(emp.total_asignaciones || 0);
+                const comp = parseInt(emp.completados || 0);
+                const ap = parseInt(emp.aprobados || 0);
+                const pend = parseInt(emp.pendientes || 0);
+                const venc = parseInt(emp.vencidos || 0);
+                const sinValidar = comp - ap;
+                const noRespondido = pend + venc;
+                const pctAp = total > 0 ? Math.round((ap / total) * 100) : 0;
+                const pctComp = total > 0 ? Math.round((comp / total) * 100) : 0;
 
-          {/* Company bar chart */}
-          {empresas.length > 0 && (
-            <div className="card mt-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-                <Building2 className="w-5 h-5 mr-2 text-[#7095B4]" />
-                Avance por Empresa
-              </h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <BarChart data={empresas.slice(0, 10).map((e) => ({
-                  name: e.empresa.length > 18 ? e.empresa.substring(0, 18) + '...' : e.empresa,
-                  completados: parseInt(e.completados || 0),
-                  pendientes: parseInt(e.pendientes || 0),
-                }))}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="completados" fill="#22c55e" name="Completados" />
-                  <Bar dataKey="pendientes" fill="#FFD600" name="Pendientes" />
-                </BarChart>
-              </ResponsiveContainer>
+                return (
+                  <div key={emp.empresa} className="card hover:shadow-md transition-shadow">
+                    {/* Header */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className="w-10 h-10 rounded-lg bg-[#7095B4]/10 text-[#7095B4] flex items-center justify-center flex-shrink-0">
+                          <Building2 className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-semibold text-gray-900 truncate">{emp.empresa}</h4>
+                          <p className="text-xs text-gray-400">{emp.total_proveedores} proveedor{emp.total_proveedores !== 1 ? 'es' : ''}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Barra de progreso principal */}
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs text-gray-500">{ap} de {total} aprobados</span>
+                        <span className={`text-sm font-bold ${pctAp === 100 ? 'text-green-600' : pctAp >= 50 ? 'text-[#7095B4]' : 'text-red-500'}`}>{pctAp}%</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+                        <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${pctAp}%` }} />
+                        <div className="h-full bg-yellow-400 transition-all duration-500" style={{ width: `${pctComp - pctAp}%` }} />
+                      </div>
+                    </div>
+
+                    {/* Métricas en fila */}
+                    <div className="grid grid-cols-4 gap-2 mb-3">
+                      <div className="text-center p-2 bg-gray-50 rounded-lg">
+                        <p className="text-lg font-bold text-gray-700">{total}</p>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide">Asignados</p>
+                      </div>
+                      <div className="text-center p-2 bg-green-50 rounded-lg">
+                        <p className="text-lg font-bold text-green-600">{ap}</p>
+                        <p className="text-[10px] text-green-500 uppercase tracking-wide">Aprobados</p>
+                      </div>
+                      <div className="text-center p-2 bg-yellow-50 rounded-lg">
+                        <p className="text-lg font-bold text-yellow-600">{sinValidar}</p>
+                        <p className="text-[10px] text-yellow-500 uppercase tracking-wide">Sin validar</p>
+                      </div>
+                      <div className="text-center p-2 bg-red-50 rounded-lg">
+                        <p className="text-lg font-bold text-red-500">{noRespondido}</p>
+                        <p className="text-[10px] text-red-400 uppercase tracking-wide">Pendientes</p>
+                      </div>
+                    </div>
+
+                    {/* Barra visual horizontal */}
+                    <div className="flex rounded-full overflow-hidden h-1.5 mb-3">
+                      {ap > 0 && <div className="bg-green-500" style={{ width: `${(ap / Math.max(total, 1)) * 100}%` }} />}
+                      {sinValidar > 0 && <div className="bg-yellow-400" style={{ width: `${(sinValidar / Math.max(total, 1)) * 100}%` }} />}
+                      {noRespondido > 0 && <div className="bg-red-300" style={{ width: `${(noRespondido / Math.max(total, 1)) * 100}%` }} />}
+                    </div>
+
+                    {/* Footer info */}
+                    <div className="flex items-center justify-between text-[11px] text-gray-400">
+                      <div className="flex items-center gap-3">
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Aprobados</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> Sin validar</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-300" /> Pendientes</span>
+                      </div>
+                      <span className="font-medium text-gray-500">{emp.porcentaje_aprobados || 0}% aprobado</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -853,35 +879,16 @@ export default function ReportsDetails() {
       {/* TAB: ENCUESTAS */}
       {activeTab === 'encuestas' && (
         <div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
             <StatsCard label="Formularios" value={surveys.length} icon={FileSpreadsheet} color="blue" />
-            <StatsCard label="Completados" value={totalCompletados} icon={CheckCircle} color="green" subtext={`${avgCompletitud}% tasa`} />
-            <StatsCard label="En progreso" value={surveys.reduce((s, f) => s + parseInt(f.en_progreso || 0), 0)} icon={Clock} color="yellow" />
+            <StatsCard label="Aprobados" value={surveys.reduce((s, f) => s + parseInt(f.aprobados || 0), 0)} icon={CheckCircle} color="green" />
+            <StatsCard label="Pendientes" value={surveys.reduce((s, f) => s + (parseInt(f.total_asignados || 0) - parseInt(f.completados || 0)), 0)} icon={Clock} color="yellow" />
             <StatsCard label="Vencidos" value={surveys.reduce((s, f) => s + parseInt(f.vencidos || 0), 0)} icon={AlertTriangle} color="red" />
           </div>
 
-          <div className="card mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <TrendingUp className="w-5 h-5 mr-2 text-[#7095B4]" />
-              Respuestas por Formulario
-            </h3>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={surveys.slice(0, 10).map((f) => ({
-                name: f.titulo.length > 18 ? f.titulo.substring(0, 18) + '...' : f.titulo,
-                completados: parseInt(f.completados || 0),
-                'En progreso': parseInt(f.en_progreso || 0),
-              }))}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="completados" fill="#22c55e" name="Completados" />
-                <Bar dataKey="En progreso" fill="#FFD600" name="En progreso" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 mb-4">
+          {/* Filtros */}
+          <div className="flex flex-wrap items-center gap-3 mb-5">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input type="text" placeholder="Buscar formulario..." value={surveySearch} onChange={(e) => setSurveySearch(e.target.value)} className="input pl-9 pr-4 w-full" />
@@ -898,140 +905,192 @@ export default function ReportsDetails() {
             </select>
           </div>
 
-          <div className="card">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 bg-gray-50">
-                    <th className="text-left py-3 px-4 text-gray-600 font-medium">Formulario</th>
-                    <th className="text-left py-3 px-4 text-gray-600 font-medium">Plantilla</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Asignados</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">Completados</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">En progreso</th>
-                    <th className="text-center py-3 px-4 text-gray-600 font-medium">% Avance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {surveys.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-8 text-gray-400">Sin resultados</td></tr>
-                  ) : surveys.map((f) => (
-                    <React.Fragment key={f.id}>
-                      <tr
-                        onClick={() => handleExpandSurvey(f.id)}
-                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                      >
-                        <td className="py-3 px-4 font-medium text-gray-900">{f.titulo}</td>
-                        <td className="py-3 px-4 text-gray-500">{f.plantilla_nombre}</td>
-                        <td className="py-3 px-4 text-center">{f.total_asignados}</td>
-                        <td className="py-3 px-4 text-center text-green-600 font-medium">{f.completados}</td>
-                        <td className="py-3 px-4 text-center text-yellow-600">{f.en_progreso}</td>
-                        <td className="py-3 px-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
-                            <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                              <div className="h-full bg-[#7095B4] rounded-full" style={{ width: `${f.porcentaje_completado || 0}%` }} />
-                            </div>
-                            <span className="text-xs font-semibold text-[#7095B4]">{f.porcentaje_completado || 0}%</span>
-                            {expandedSurvey === f.id ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
-                          </div>
-                        </td>
-                      </tr>
-                      {expandedSurvey === f.id && (
-                        <tr>
-                          <td colSpan={6} className="px-4 py-3 bg-gray-50/50">
-                            {loadingSurveyUsers ? (
-                              <div className="flex items-center justify-center py-4">
-                                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
-                              </div>
-                            ) : surveyUsersData ? (
-                              <div>
-                                <div className="flex items-center justify-between mb-2">
-                                  <p className="text-xs text-gray-500">
-                                    {surveyUsersData.completados || 0} respondidos de {surveyUsersData.total_asignados || 0} asignados
-                                  </p>
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); handleExport(f.id, 'xlsx'); }}
-                                    className="flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 border border-green-200 rounded-lg text-xs font-medium hover:bg-green-100 transition-colors"
-                                  >
-                                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                                    Descargar Excel
-                                  </button>
-                                </div>
-                                <div className="overflow-x-auto">
-                                  <table className="w-full text-sm">
-                                    <thead>
-                                      <tr className="border-b border-gray-200 bg-gray-100">
-                                        <th className="text-left py-2 px-3 text-gray-600 font-medium text-xs">Usuario</th>
-                                        <th className="text-left py-2 px-3 text-gray-600 font-medium text-xs">Empresa</th>
-                                        <th className="text-center py-2 px-3 text-gray-600 font-medium text-xs">Estado</th>
-                                        <th className="text-center py-2 px-3 text-gray-600 font-medium text-xs">Progreso</th>
-                                        <th className="text-center py-2 px-3 text-gray-600 font-medium text-xs">Validacion</th>
-                                        <th className="text-right py-2 px-3 text-gray-600 font-medium text-xs">Fecha</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {surveyUsersData.usuarios?.length === 0 ? (
-                                        <tr><td colSpan={6} className="text-center py-4 text-gray-400 text-xs">Sin usuarios asignados</td></tr>
-                                      ) : surveyUsersData.usuarios.map((u) => (
-                                        <tr key={u.asignacion_id} className="border-b border-gray-100">
-                                          <td className="py-2 px-3">
-                                            <p className="text-xs font-medium text-gray-900">{u.nombre} {u.apellido}</p>
-                                            <p className="text-xs text-gray-400">{u.email}</p>
-                                          </td>
-                                          <td className="py-2 px-3 text-xs text-gray-600">{u.empresa || '-'}</td>
-                                          <td className="py-2 px-3 text-center">
-                                            {u.estado === 'completado' ? (
-                                              <span className="badge-green">Completado</span>
-                                            ) : u.estado === 'en_progreso' ? (
-                                              <span className="badge-blue">En progreso</span>
-                                            ) : u.estado === 'vencido' ? (
-                                              <span className="badge-red">Vencido</span>
-                                            ) : (
-                                              <span className="badge-yellow">Pendiente</span>
-                                            )}
-                                          </td>
-                                          <td className="py-2 px-3 text-center">
-                                            <div className="flex items-center justify-center gap-1.5">
-                                              <div className="w-12 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                                                <div
-                                                  className={`h-full rounded-full ${u.progreso === 100 ? 'bg-green-500' : u.progreso > 0 ? 'bg-yellow-500' : 'bg-gray-300'}`}
-                                                  style={{ width: `${u.progreso}%` }}
-                                                />
-                                              </div>
-                                              <span className="text-xs text-gray-500 w-16 text-right">{u.campos_respondidos}/{u.total_campos}</span>
-                                            </div>
-                                          </td>
-                                          <td className="py-2 px-3 text-center">
-                                            {u.respondido && u.respuesta_id ? (
-                                              u.estado_validacion === 'validado' ? (
-                                                <span className="badge-green">Validado</span>
-                                              ) : u.estado_validacion === 'rechazado' ? (
-                                                <span className="badge-red">Rechazado</span>
-                                              ) : (
-                                                <span className="badge-yellow">Pendiente</span>
-                                              )
-                                            ) : (
-                                              <span className="text-xs text-gray-300">-</span>
-                                            )}
-                                          </td>
-                                          <td className="py-2 px-3 text-right text-xs text-gray-500">
-                                            {u.fecha_respuesta ? new Date(u.fecha_respuesta).toLocaleDateString('es-CL') : new Date(u.fecha_envio).toLocaleDateString('es-CL')}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              </div>
-                            ) : null}
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </tbody>
-              </table>
+          {/* Tarjetas de formularios */}
+          {surveys.length === 0 ? (
+            <div className="card py-12 text-center text-gray-400">
+              <FileSpreadsheet className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+              <p className="text-sm">No se encontraron formularios</p>
             </div>
-          </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {surveys.map((f) => {
+                const total = parseInt(f.total_asignados || 0);
+                const comp = parseInt(f.completados || 0);
+                const ap = parseInt(f.aprobados || 0);
+                const pend = total - comp;
+                const sinValidar = comp - ap;
+                const pctAp = total > 0 ? Math.round((ap / total) * 100) : 0;
+                const pctComp = total > 0 ? Math.round((comp / total) * 100) : 0;
+                const isExpanded = expandedSurvey === f.id;
+                const fechaLimite = f.fecha_limite ? new Date(f.fecha_limite) : null;
+                const vencido = fechaLimite && fechaLimite < new Date();
+
+                return (
+                  <div key={f.id} className="card hover:shadow-md transition-shadow">
+                    {/* Header de la tarjeta */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1 min-w-0 pr-3">
+                        <h4 className="font-semibold text-gray-900 truncate" title={f.titulo}>{f.titulo}</h4>
+                        <p className="text-xs text-gray-400 mt-0.5">{f.plantilla_nombre}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => reportService.exportFormStatus(f.id).then((blob) => {
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${f.titulo} - Estado.xlsx`;
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                          }).catch(() => alert('Error exportando'))}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                          title="Descargar Excel"
+                        >
+                          <FileSpreadsheet className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleExpandSurvey(f.id)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-[#7095B4] hover:bg-[#7095B4]/10 transition-colors"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Barra de progreso principal */}
+                    <div className="mb-3">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-xs text-gray-500">{ap} de {total} aprobados</span>
+                        <span className={`text-sm font-bold ${pctAp === 100 ? 'text-green-600' : pctAp >= 50 ? 'text-[#7095B4]' : 'text-red-500'}`}>{pctAp}%</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden flex">
+                        <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${pctAp}%` }} />
+                        <div className="h-full bg-yellow-400 transition-all duration-500" style={{ width: `${pctComp - pctAp}%` }} />
+                      </div>
+                    </div>
+
+                    {/* Métricas en fila */}
+                    <div className="grid grid-cols-4 gap-2 mb-3">
+                      <div className="text-center p-2 bg-gray-50 rounded-lg">
+                        <p className="text-lg font-bold text-gray-700">{total}</p>
+                        <p className="text-[10px] text-gray-400 uppercase tracking-wide">Asignados</p>
+                      </div>
+                      <div className="text-center p-2 bg-green-50 rounded-lg">
+                        <p className="text-lg font-bold text-green-600">{ap}</p>
+                        <p className="text-[10px] text-green-500 uppercase tracking-wide">Aprobados</p>
+                      </div>
+                      <div className="text-center p-2 bg-yellow-50 rounded-lg">
+                        <p className="text-lg font-bold text-yellow-600">{sinValidar}</p>
+                        <p className="text-[10px] text-yellow-500 uppercase tracking-wide">Sin validar</p>
+                      </div>
+                      <div className="text-center p-2 bg-red-50 rounded-lg">
+                        <p className="text-lg font-bold text-red-500">{pend}</p>
+                        <p className="text-[10px] text-red-400 uppercase tracking-wide">Pendientes</p>
+                      </div>
+                    </div>
+
+                    {/* Barra visual horizontal (mini chart) */}
+                    <div className="flex rounded-full overflow-hidden h-1.5 mb-3">
+                      {ap > 0 && <div className="bg-green-500" style={{ width: `${(ap / Math.max(total, 1)) * 100}%` }} />}
+                      {sinValidar > 0 && <div className="bg-yellow-400" style={{ width: `${(sinValidar / Math.max(total, 1)) * 100}%` }} />}
+                      {pend > 0 && <div className="bg-red-300" style={{ width: `${(pend / Math.max(total, 1)) * 100}%` }} />}
+                    </div>
+
+                    {/* Footer info */}
+                    <div className="flex items-center justify-between text-[11px] text-gray-400">
+                      <div className="flex items-center gap-3">
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Aprobados</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-400" /> Sin validar</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-300" /> Pendientes</span>
+                      </div>
+                      {fechaLimite && (
+                        <span className={vencido ? 'text-red-500 font-medium' : ''}>
+                          {vencido ? 'Vencido' : `Vence: ${fechaLimite.toLocaleDateString('es-CL')}`}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Detalle expandido */}
+                    {isExpanded && (
+                      <div className="mt-4 pt-4 border-t border-gray-100">
+                        {loadingSurveyUsers ? (
+                          <div className="flex items-center justify-center py-6">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#7095B4]"></div>
+                          </div>
+                        ) : surveyUsersData ? (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-gray-200 bg-gray-50">
+                                  <th className="text-left py-2 px-2 text-gray-500 font-medium text-xs">Proveedor</th>
+                                  <th className="text-left py-2 px-2 text-gray-500 font-medium text-xs">Empresa</th>
+                                  <th className="text-center py-2 px-2 text-gray-500 font-medium text-xs">Estado</th>
+                                  <th className="text-center py-2 px-2 text-gray-500 font-medium text-xs">Progreso</th>
+                                  <th className="text-center py-2 px-2 text-gray-500 font-medium text-xs">Validacion</th>
+                                  <th className="text-right py-2 px-2 text-gray-500 font-medium text-xs">Fecha</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {surveyUsersData.usuarios?.length === 0 ? (
+                                  <tr><td colSpan={6} className="text-center py-4 text-gray-400 text-xs">Sin usuarios asignados</td></tr>
+                                ) : surveyUsersData.usuarios.map((u) => (
+                                  <tr key={u.asignacion_id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                    <td className="py-2 px-2">
+                                      <p className="text-xs font-medium text-gray-900">{u.nombre} {u.apellido}</p>
+                                      <p className="text-[11px] text-gray-400">{u.email}</p>
+                                    </td>
+                                    <td className="py-2 px-2 text-xs text-gray-600">{u.empresa || '-'}</td>
+                                    <td className="py-2 px-2 text-center">
+                                      {u.estado === 'completado' ? (
+                                        <span className="badge-green">Completado</span>
+                                      ) : u.estado === 'en_progreso' ? (
+                                        <span className="badge-blue">En progreso</span>
+                                      ) : u.estado === 'vencido' ? (
+                                        <span className="badge-red">Vencido</span>
+                                      ) : (
+                                        <span className="badge-yellow">Pendiente</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2 px-2 text-center">
+                                      <div className="flex items-center justify-center gap-1.5">
+                                        <div className="w-12 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                          <div
+                                            className={`h-full rounded-full ${u.progreso === 100 ? 'bg-green-500' : u.progreso > 0 ? 'bg-yellow-500' : 'bg-gray-300'}`}
+                                            style={{ width: `${u.progreso}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-xs text-gray-500">{u.campos_respondidos}/{u.total_campos}</span>
+                                      </div>
+                                    </td>
+                                    <td className="py-2 px-2 text-center">
+                                      {u.respondido && u.respuesta_id ? (
+                                        u.estado_validacion === 'validado' ? (
+                                          <span className="badge-green">Validado</span>
+                                        ) : u.estado_validacion === 'rechazado' ? (
+                                          <span className="badge-red">Rechazado</span>
+                                        ) : (
+                                          <span className="badge-yellow">Pendiente</span>
+                                        )
+                                      ) : (
+                                        <span className="text-xs text-gray-300">-</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2 px-2 text-right text-xs text-gray-500">
+                                      {u.fecha_respuesta ? new Date(u.fecha_respuesta).toLocaleDateString('es-CL') : new Date(u.fecha_envio).toLocaleDateString('es-CL')}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

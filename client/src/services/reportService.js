@@ -7,6 +7,8 @@ const reportService = {
   formUserStatus: (id) => api.get(`/reports/form/${id}/users`).then((r) => r.data),
   exportForm: (id, format = 'xlsx') =>
     api.get(`/reports/export/${id}`, { params: { format }, responseType: 'blob' }).then((r) => r.data),
+  exportFormStatus: (id) =>
+    api.get(`/reports/export/${id}/status`, { responseType: 'blob' }).then((r) => r.data),
   reportByUser: (params) => api.get('/reports/users', { params }).then((r) => r.data),
   reportSurveys: (params) => api.get('/reports/surveys', { params }).then((r) => r.data),
   reportByCompany: (params) => api.get('/reports/companies', { params }).then((r) => r.data),

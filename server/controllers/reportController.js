@@ -376,10 +376,15 @@ const reportSurveys = async (req, res) => {
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'completado') as completados,
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado IN ('pendiente', 'en_progreso')) as en_progreso,
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'vencido') as vencidos,
+        (SELECT COUNT(*) FROM asignaciones_formulario af
+          JOIN respuestas_formulario rf ON rf.asignacion_id = af.id AND rf.estado_validacion = 'validado'
+          WHERE af.formulario_id = f.id AND af.estado = 'completado') as aprobados,
         ROUND(
-          (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'completado')::numeric /
+          (SELECT COUNT(*) FROM asignaciones_formulario af
+            JOIN respuestas_formulario rf ON rf.asignacion_id = af.id AND rf.estado_validacion = 'validado'
+            WHERE af.formulario_id = f.id AND af.estado = 'completado')::numeric /
           NULLIF((SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id), 0) * 100, 1
-        ) as porcentaje_completado
+        ) as porcentaje_aprobados
       FROM formularios f
       JOIN plantillas p ON f.plantilla_id = p.id
       WHERE 1=1
@@ -636,10 +641,15 @@ const reportByCompany = async (req, res) => {
         COUNT(DISTINCT CASE WHEN a.estado = 'completado' THEN a.id END) as completados,
         COUNT(DISTINCT CASE WHEN a.estado IN ('pendiente', 'en_progreso') THEN a.id END) as pendientes,
         COUNT(DISTINCT CASE WHEN a.estado = 'vencido' THEN a.id END) as vencidos,
+        COUNT(DISTINCT CASE WHEN a.estado = 'completado' AND EXISTS (
+          SELECT 1 FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id AND rf.estado_validacion = 'validado'
+        ) THEN a.id END) as aprobados,
         ROUND(
-          COUNT(DISTINCT CASE WHEN a.estado = 'completado' THEN a.id END)::numeric /
+          COUNT(DISTINCT CASE WHEN a.estado = 'completado' AND EXISTS (
+            SELECT 1 FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id AND rf.estado_validacion = 'validado'
+          ) THEN a.id END)::numeric /
           NULLIF(COUNT(DISTINCT a.id), 0) * 100, 1
-        ) as porcentaje_completado
+        ) as porcentaje_aprobados
       FROM usuarios u
       LEFT JOIN asignaciones_formulario a ON a.proveedor_id = u.id
       WHERE u.rol = 'usuario'
@@ -684,10 +694,15 @@ const exportAll = async (req, res) => {
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'completado') as completados,
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado IN ('pendiente', 'en_progreso')) as en_progreso,
         (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'vencido') as vencidos,
+        (SELECT COUNT(*) FROM asignaciones_formulario af
+          JOIN respuestas_formulario rf ON rf.asignacion_id = af.id AND rf.estado_validacion = 'validado'
+          WHERE af.formulario_id = f.id AND af.estado = 'completado') as aprobados,
         ROUND(
-          (SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id AND estado = 'completado')::numeric /
+          (SELECT COUNT(*) FROM asignaciones_formulario af
+            JOIN respuestas_formulario rf ON rf.asignacion_id = af.id AND rf.estado_validacion = 'validado'
+            WHERE af.formulario_id = f.id AND af.estado = 'completado')::numeric /
           NULLIF((SELECT COUNT(*) FROM asignaciones_formulario WHERE formulario_id = f.id), 0) * 100, 1
-        ) as porcentaje_completado
+        ) as porcentaje_aprobados
       FROM formularios f
       JOIN plantillas p ON f.plantilla_id = p.id
       WHERE 1=1
@@ -725,11 +740,15 @@ const exportAll = async (req, res) => {
     const formsResult = await pool.query(query, params);
 
     if (format === 'csv') {
-      const headers = ['Formulario', 'Plantilla', 'Estado', 'Creado', 'Limite', 'Asignados', 'Completados', 'En Progreso', 'Vencidos', '% Avance'];
+      const headers = ['Formulario', 'Plantilla', 'Estado', 'Creado', 'Limite', 'Asignados', 'Aprobados', 'Completados', 'En Progreso', 'Vencidos', '% Aprobados', '% Pendientes'];
       const rows = [headers.join(';')];
       for (const f of formsResult.rows) {
+        const pendientes = parseInt(f.total_asignados || 0) - parseInt(f.completados || 0);
+        const pctPendientes = parseInt(f.total_asignados || 0) > 0
+          ? (pendientes / parseInt(f.total_asignados) * 100).toFixed(1) : '0.0';
         rows.push([f.titulo, f.plantilla_nombre, f.estado, f.fecha_creacion, f.fecha_limite || '',
-          f.total_asignados, f.completados, f.en_progreso, f.vencidos, f.porcentaje_completado + '%'].join(';'));
+          f.total_asignados, f.aprobados, f.completados, f.en_progreso, f.vencidos,
+          f.porcentaje_aprobados + '%', pctPendientes + '%'].join(';'));
       }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', 'attachment; filename="reporte_encuestas.csv"');
@@ -741,16 +760,20 @@ const exportAll = async (req, res) => {
     const ws = workbook.addWorksheet('Resumen Encuestas');
 
     // Header
-    ws.addRow(['Formulario', 'Plantilla', 'Estado', 'Fecha Creación', 'Fecha Límite', 'Asignados', 'Completados', 'En Progreso', 'Vencidos', '% Avance']);
+    ws.addRow(['Formulario', 'Plantilla', 'Estado', 'Fecha Creación', 'Fecha Límite', 'Asignados', 'Aprobados', 'Completados', 'En Progreso', 'Vencidos', '% Aprobados', '% Pendientes']);
     ws.getRow(1).font = { bold: true };
     ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF232856' } };
     ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
 
     for (const f of formsResult.rows) {
+      const pendientes = parseInt(f.total_asignados || 0) - parseInt(f.completados || 0);
+      const pctPendientes = parseInt(f.total_asignados || 0) > 0
+        ? (pendientes / parseInt(f.total_asignados) * 100).toFixed(1) : '0.0';
       ws.addRow([f.titulo, f.plantilla_nombre, f.estado,
         f.fecha_creacion ? new Date(f.fecha_creacion).toLocaleDateString('es-CL') : '',
         f.fecha_limite ? new Date(f.fecha_limite).toLocaleDateString('es-CL') : '',
-        f.total_asignados, f.completados, f.en_progreso, f.vencidos, f.porcentaje_completado + '%']);
+        f.total_asignados, f.aprobados, f.completados, f.en_progreso, f.vencidos,
+        f.porcentaje_aprobados + '%', pctPendientes + '%']);
     }
 
     ws.columns.forEach((col) => { col.width = 18; });
@@ -765,4 +788,144 @@ const exportAll = async (req, res) => {
   }
 };
 
-module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll };
+const exportFormStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Info del formulario
+    const formResult = await pool.query(`
+      SELECT f.titulo, f.fecha_limite, p.nombre as plantilla_nombre
+      FROM formularios f
+      JOIN plantillas p ON f.plantilla_id = p.id
+      WHERE f.id = $1
+    `, [id]);
+
+    if (formResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Formulario no encontrado' });
+    }
+
+    // Estado de cada asignado
+    const result = await pool.query(`
+      SELECT a.estado, a.fecha_respuesta, a.fecha_envio,
+             u.nombre, u.apellido, u.rut, u.email, u.empresa,
+             (SELECT COUNT(*) FROM campos_plantilla cp WHERE cp.plantilla_id = f.plantilla_id) as total_campos,
+             CASE WHEN a.estado = 'completado'
+               THEN (SELECT COUNT(*) FROM campos_plantilla cp WHERE cp.plantilla_id = f.plantilla_id)
+               ELSE (SELECT COUNT(*) FROM borradores_respuesta br
+                     WHERE br.asignacion_id = a.id
+                     AND (br.valor_texto IS NOT NULL AND br.valor_texto != ''
+                          OR br.valor_numero IS NOT NULL
+                          OR br.valor_fecha IS NOT NULL
+                          OR br.valor_json IS NOT NULL
+                          OR br.archivo_url IS NOT NULL))
+             END as campos_respondidos,
+             (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion
+      FROM asignaciones_formulario a
+      JOIN usuarios u ON a.proveedor_id = u.id
+      JOIN formularios f ON a.formulario_id = f.id
+      WHERE a.formulario_id = $1
+      ORDER BY
+        CASE WHEN a.estado = 'completado' THEN 1
+             WHEN a.estado IN ('pendiente', 'en_progreso') THEN 2
+             ELSE 3 END,
+        u.apellido, u.nombre
+    `, [id]);
+
+    const totalAsignados = result.rows.length;
+    const completados = result.rows.filter(r => r.estado === 'completado').length;
+    const aprobados = result.rows.filter(r => r.estado_validacion === 'validado').length;
+    const pendientes = totalAsignados - completados;
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet(formResult.rows[0].titulo.substring(0, 31));
+    const form = formResult.rows[0];
+
+    // Título principal
+    ws.addRow([form.titulo]);
+    ws.mergeCells('A1:I1');
+    ws.getRow(1).font = { bold: true, size: 16, color: { argb: 'FF232856' } };
+    ws.getRow(1).alignment = { horizontal: 'left' };
+
+    // Info del formulario
+    const infoRow = ws.addRow([`Plantilla: ${form.plantilla_nombre}`, form.fecha_limite ? `Fecha limite: ${new Date(form.fecha_limite).toLocaleDateString('es-CL')}` : 'Sin fecha limite', `Generado: ${new Date().toLocaleDateString('es-CL')}`]);
+    ws.mergeCells('A2:I2');
+    ws.getRow(2).font = { size: 10, color: { argb: 'FF6B7280' } };
+
+    ws.addRow([]);
+    ws.addRow(['Resumen']);
+    ws.mergeCells('A4:I4');
+    ws.getRow(4).font = { bold: true, size: 11 };
+
+    ws.addRow(['Total Asignados', 'Completados', 'Aprobados', 'Pendientes', '% Completado', '% Aprobados']);
+    const resumenRow = ws.addRow([
+      totalAsignados, completados, aprobados, pendientes,
+      totalAsignados > 0 ? (completados / totalAsignados * 100).toFixed(1) + '%' : '0%',
+      totalAsignados > 0 ? (aprobados / totalAsignados * 100).toFixed(1) + '%' : '0%',
+    ]);
+    resumenRow.font = { bold: true };
+    resumenRow.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+    resumenRow.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+
+    ws.addRow([]);
+
+    // Tabla detallada
+    const headers = ['Proveedor', 'RUT', 'Email', 'Empresa', 'Estado', 'Progreso', 'Validacion', 'Fecha Envio', 'Fecha Respuesta'];
+    const headerRow = ws.addRow(headers);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF232856' } };
+
+    const estadoLabel = (e) => {
+      switch (e) {
+        case 'completado': return 'Completado';
+        case 'en_progreso': return 'En progreso';
+        case 'vencido': return 'Vencido';
+        default: return 'Pendiente';
+      }
+    };
+
+    const validacionLabel = (v) => {
+      switch (v) {
+        case 'validado': return 'Aprobado';
+        case 'rechazado': return 'Rechazado';
+        default: return 'Pendiente';
+      }
+    };
+
+    for (const row of result.rows) {
+      const tc = row.total_campos || 1;
+      const cr = row.campos_respondidos || 0;
+      const progreso = Math.round((cr / tc) * 100);
+      const wsRow = ws.addRow([
+        `${row.nombre || ''} ${row.apellido || ''}`.trim(),
+        row.rut || '',
+        row.email || '',
+        row.empresa || '',
+        estadoLabel(row.estado),
+        `${cr}/${tc} (${progreso}%)`,
+        row.estado === 'completado' ? validacionLabel(row.estado_validacion) : '-',
+        row.fecha_envio ? new Date(row.fecha_envio).toLocaleDateString('es-CL') : '',
+        row.fecha_respuesta ? new Date(row.fecha_respuesta).toLocaleDateString('es-CL') : '',
+      ]);
+
+      // Colorear fila según estado
+      const bgColor = row.estado === 'completado'
+        ? (row.estado_validacion === 'validado' ? 'FFC8E6C9' : 'FFFFF9C4')
+        : row.estado === 'vencido' ? 'FFFFCDD2' : 'FFFFFFFF';
+      wsRow.eachCell({ includeEmpty: true }, (cell) => {
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+      });
+    }
+
+    ws.columns.forEach((col) => { col.width = 20 });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${formResult.rows[0].titulo} - Estado.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Error exportando estado:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll, exportFormStatus };

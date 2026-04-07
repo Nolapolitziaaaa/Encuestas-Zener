@@ -12,6 +12,7 @@ router.get('/form/:id', verifyToken, reportController.formDetail);
 router.get('/form/:id/responses', verifyToken, reportController.formResponses);
 router.get('/form/:id/users', verifyToken, requireAdmin, reportController.formUserStatus);
 router.get('/export/:id', verifyToken, reportController.exportForm);
+router.get('/export/:id/status', verifyToken, reportController.exportFormStatus);
 router.get('/preview', verifyToken, reportController.previewFile);
 router.get('/preview/:id/pdf', verifyToken, reportController.previewServe);
 router.get('/companies', verifyToken, requireAdmin, reportController.reportByCompany);
