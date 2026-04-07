@@ -143,17 +143,6 @@ const create = async (req, res) => {
           [formId, proveedor_id]
         );
         created++;
-
-        // Notificar por email
-        const userResult = await client.query('SELECT nombre, apellido, email FROM usuarios WHERE id = $1', [proveedor_id]);
-        if (userResult.rows.length > 0) {
-          const user = userResult.rows[0];
-          try {
-            await sendFormNotification(`${user.nombre} ${user.apellido}`, user.email, plantilla.nombre, fecha_limite);
-          } catch (emailErr) {
-            console.error(`Error enviando notificación a ${user.email}:`, emailErr.message);
-          }
-        }
       } catch (err) {
         console.error(`Error asignando usuario ${proveedor_id}:`, err.message);
       }
@@ -161,10 +150,24 @@ const create = async (req, res) => {
 
     await client.query('COMMIT');
 
+    // Obtener usuarios para notificar
+    const usersResult = await client.query(
+      'SELECT nombre, apellido, email FROM usuarios WHERE id = ANY($1)',
+      [proveedor_ids]
+    );
+    client.release();
+
+    // Responder inmediatamente al cliente
     res.status(201).json({
       ...formResult.rows[0],
       asignaciones_creadas: created,
     });
+
+    // Enviar emails en background (no bloquea la respuesta)
+    for (const user of usersResult.rows) {
+      sendFormNotification(`${user.nombre} ${user.apellido}`, user.email, plantilla.nombre, fecha_limite)
+        .catch((emailErr) => console.error(`Error enviando notificación a ${user.email}:`, emailErr.message));
+    }
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Error creando formulario:', err);

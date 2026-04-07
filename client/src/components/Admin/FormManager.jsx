@@ -23,6 +23,7 @@ export default function FormManager() {
     proveedor_ids: [],
     fecha_limite: '',
   });
+  const [creating, setCreating] = useState(false);
 
   // User selector state
   const [userSearch, setUserSearch] = useState('');
@@ -66,7 +67,9 @@ export default function FormManager() {
       alert('Completa todos los campos requeridos');
       return;
     }
+    if (creating) return;
 
+    setCreating(true);
     try {
       await formService.create({
         ...newForm,
@@ -80,6 +83,8 @@ export default function FormManager() {
       loadData();
     } catch (err) {
       alert('Error: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -400,9 +405,18 @@ export default function FormManager() {
 
           <div className="flex space-x-3 pt-2">
             <button onClick={() => { setShowCreate(false); setUserSearch(''); }} className="flex-1 btn-secondary">Cancelar</button>
-            <button onClick={handleCreate} className="flex-1 btn-primary flex items-center justify-center">
-              <Send className="w-4 h-4 mr-2" />
-              Crear y Enviar
+            <button onClick={handleCreate} disabled={creating} className="flex-1 btn-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+              {creating ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
+                  Creando...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Crear y Enviar
+                </>
+              )}
             </button>
           </div>
         </div>
