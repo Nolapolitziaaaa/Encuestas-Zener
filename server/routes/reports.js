@@ -16,6 +16,8 @@ router.get('/export/:id/status', verifyToken, reportController.exportFormStatus)
 router.get('/preview', verifyToken, reportController.previewFile);
 router.get('/preview/:id/pdf', verifyToken, reportController.previewServe);
 router.get('/companies', verifyToken, requireAdmin, reportController.reportByCompany);
+router.get('/company-detail', verifyToken, requireAdmin, reportController.companyFormDetail);
+router.get('/company-detail/export', verifyToken, requireAdmin, reportController.exportCompanyDetail);
 router.get('/export-all', verifyToken, requireAdmin, reportController.exportAll);
 
 module.exports = router;

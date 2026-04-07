@@ -181,6 +181,9 @@ export default function ReportsDetails() {
   // Company report state
   const [empresas, setEmpresas] = useState([]);
   const [companySearch, setCompanySearch] = useState('');
+  const [expandedCompany, setExpandedCompany] = useState(null);
+  const [companyDetailData, setCompanyDetailData] = useState(null);
+  const [loadingCompanyDetail, setLoadingCompanyDetail] = useState(false);
 
   // Survey report state
   const [surveys, setSurveys] = useState([]);
@@ -304,6 +307,22 @@ export default function ReportsDetails() {
       const data = await reportService.reportByCompany(params);
       setEmpresas(data.empresas || []);
     } catch (err) { console.error(err); }
+  };
+
+  const handleExpandCompany = async (empresa) => {
+    if (expandedCompany === empresa) {
+      setExpandedCompany(null);
+      setCompanyDetailData(null);
+      return;
+    }
+    setExpandedCompany(empresa);
+    setCompanyDetailData(null);
+    setLoadingCompanyDetail(true);
+    try {
+      const data = await reportService.companyFormDetail(empresa);
+      setCompanyDetailData(data);
+    } catch (err) { console.error(err); }
+    finally { setLoadingCompanyDetail(false); }
   };
 
   const handleExportAll = async () => {
@@ -804,6 +823,7 @@ export default function ReportsDetails() {
                 const noRespondido = pend + venc;
                 const pctAp = total > 0 ? Math.round((ap / total) * 100) : 0;
                 const pctComp = total > 0 ? Math.round((comp / total) * 100) : 0;
+                const isExpanded = expandedCompany === emp.empresa;
 
                 return (
                   <div key={emp.empresa} className="card hover:shadow-md transition-shadow">
@@ -817,6 +837,28 @@ export default function ReportsDetails() {
                           <h4 className="font-semibold text-gray-900 truncate">{emp.empresa}</h4>
                           <p className="text-xs text-gray-400">{emp.total_proveedores} proveedor{emp.total_proveedores !== 1 ? 'es' : ''}</p>
                         </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => reportService.exportCompanyDetail(emp.empresa).then((blob) => {
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${emp.empresa} - Estado.xlsx`;
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                          }).catch(() => alert('Error exportando'))}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"
+                          title="Descargar Excel"
+                        >
+                          <FileSpreadsheet className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleExpandCompany(emp.empresa)}
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-[#7095B4] hover:bg-[#7095B4]/10 transition-colors"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
 
@@ -868,6 +910,70 @@ export default function ReportsDetails() {
                       </div>
                       <span className="font-medium text-gray-500">{emp.porcentaje_aprobados || 0}% aprobado</span>
                     </div>
+
+                    {/* Detalle expandido: formularios por empresa */}
+                    {isExpanded && (
+                      <div className="mt-4 pt-4 border-t border-gray-100">
+                        {loadingCompanyDetail ? (
+                          <div className="flex items-center justify-center py-6">
+                            <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-[#7095B4]"></div>
+                          </div>
+                        ) : companyDetailData ? (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-3 font-medium">
+                              {companyDetailData.formularios.length} evaluacion{companyDetailData.formularios.length !== 1 ? 'es' : ''} asignada{companyDetailData.formularios.length !== 1 ? 's' : ''}
+                            </p>
+                            {companyDetailData.formularios.length === 0 ? (
+                              <p className="text-xs text-gray-400 text-center py-4">Sin evaluaciones asignadas</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {companyDetailData.formularios.map((f) => {
+                                  const fTotal = parseInt(f.total_asignados || 0);
+                                  const fAp = parseInt(f.aprobados || 0);
+                                  const fComp = parseInt(f.completados || 0);
+                                  const fPend = parseInt(f.pendientes || 0);
+                                  const fVenc = parseInt(f.vencidos || 0);
+                                  const fSinVal = fComp - fAp;
+                                  const fPct = fTotal > 0 ? Math.round((fAp / fTotal) * 100) : 0;
+                                  const fFechaLimite = f.fecha_limite ? new Date(f.fecha_limite) : null;
+                                  const fVencido = fFechaLimite && fFechaLimite < new Date();
+
+                                  return (
+                                    <div key={f.formulario_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100/80 transition-colors">
+                                      <div className="flex-1 min-w-0 mr-3">
+                                        <p className="text-sm font-medium text-gray-800 truncate">{f.titulo}</p>
+                                        <div className="flex items-center gap-3 mt-1.5">
+                                          <span className="flex items-center gap-1 text-xs text-green-600">
+                                            <CheckCircle className="w-3 h-3" />{fAp}
+                                          </span>
+                                          <span className="flex items-center gap-1 text-xs text-yellow-600">
+                                            <Clock className="w-3 h-3" />{fSinVal} sin validar
+                                          </span>
+                                          <span className="flex items-center gap-1 text-xs text-red-500">
+                                            <AlertTriangle className="w-3 h-3" />{fPend + fVenc} pendientes
+                                          </span>
+                                          {fFechaLimite && (
+                                            <span className={`text-xs ${fVencido ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+                                              {fVencido ? 'Vencido' : fFechaLimite.toLocaleDateString('es-CL')}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2 flex-shrink-0">
+                                        <div className="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                                          <div className="h-full bg-green-500 rounded-full" style={{ width: `${fPct}%` }} />
+                                        </div>
+                                        <span className={`text-xs font-bold w-10 text-right ${fPct === 100 ? 'text-green-600' : 'text-gray-500'}`}>{fPct}%</span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
                 );
               })}

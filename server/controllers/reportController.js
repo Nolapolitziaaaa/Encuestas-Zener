@@ -928,4 +928,157 @@ const exportFormStatus = async (req, res) => {
   }
 };
 
-module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll, exportFormStatus };
+const companyFormDetail = async (req, res) => {
+  try {
+    const { empresa } = req.query;
+    if (!empresa) return res.status(400).json({ error: 'Empresa requerida' });
+
+    const result = await pool.query(`
+      SELECT f.id as formulario_id, f.titulo, f.fecha_limite, f.estado as estado_formulario,
+        COUNT(a.id) as total_asignados,
+        COUNT(CASE WHEN a.estado = 'completado' THEN 1 END) as completados,
+        COUNT(CASE WHEN a.estado = 'completado' AND EXISTS (
+          SELECT 1 FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id AND rf.estado_validacion = 'validado'
+        ) THEN 1 END) as aprobados,
+        COUNT(CASE WHEN a.estado IN ('pendiente', 'en_progreso') THEN 1 END) as pendientes,
+        COUNT(CASE WHEN a.estado = 'vencido' THEN 1 END) as vencidos,
+        ROUND(
+          COUNT(CASE WHEN a.estado = 'completado' AND EXISTS (
+            SELECT 1 FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id AND rf.estado_validacion = 'validado'
+          ) THEN 1 END)::numeric / NULLIF(COUNT(a.id), 0) * 100, 1
+        ) as porcentaje_aprobados
+      FROM formularios f
+      JOIN asignaciones_formulario a ON a.formulario_id = f.id
+      JOIN usuarios u ON a.proveedor_id = u.id
+      WHERE u.empresa = $1 AND u.rol = 'usuario'
+      GROUP BY f.id, f.titulo, f.fecha_limite, f.estado
+      ORDER BY f.fecha_creacion DESC
+    `, [empresa]);
+
+    res.json({ empresa, formularios: result.rows });
+  } catch (err) {
+    console.error('Error detalle empresa:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+const exportCompanyDetail = async (req, res) => {
+  try {
+    const { empresa } = req.query;
+    if (!empresa) return res.status(400).json({ error: 'Empresa requerida' });
+
+    // Datos por formulario
+    const formsResult = await pool.query(`
+      SELECT f.titulo, f.fecha_limite, f.estado as estado_formulario,
+        COUNT(a.id) as total_asignados,
+        COUNT(CASE WHEN a.estado = 'completado' THEN 1 END) as completados,
+        COUNT(CASE WHEN a.estado = 'completado' AND EXISTS (
+          SELECT 1 FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id AND rf.estado_validacion = 'validado'
+        ) THEN 1 END) as aprobados,
+        COUNT(CASE WHEN a.estado IN ('pendiente', 'en_progreso') THEN 1 END) as pendientes,
+        COUNT(CASE WHEN a.estado = 'vencido' THEN 1 END) as vencidos
+      FROM formularios f
+      JOIN asignaciones_formulario a ON a.formulario_id = f.id
+      JOIN usuarios u ON a.proveedor_id = u.id
+      WHERE u.empresa = $1 AND u.rol = 'usuario'
+      GROUP BY f.id, f.titulo, f.fecha_limite, f.estado
+      ORDER BY f.fecha_creacion DESC
+    `, [empresa]);
+
+    // Detalle por proveedor y formulario
+    const detailResult = await pool.query(`
+      SELECT f.titulo as formulario, u.nombre, u.apellido, u.rut, u.email,
+        a.estado, a.fecha_envio, a.fecha_respuesta,
+        (SELECT rf.estado_validacion FROM respuestas_formulario rf WHERE rf.asignacion_id = a.id ORDER BY rf.id DESC LIMIT 1) as estado_validacion
+      FROM formularios f
+      JOIN asignaciones_formulario a ON a.formulario_id = f.id
+      JOIN usuarios u ON a.proveedor_id = u.id
+      WHERE u.empresa = $1 AND u.rol = 'usuario'
+      ORDER BY f.titulo, u.apellido, u.nombre
+    `, [empresa]);
+
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet(empresa.substring(0, 31));
+
+    // Título
+    ws.addRow([empresa]);
+    ws.mergeCells('A1:G1');
+    ws.getRow(1).font = { bold: true, size: 16, color: { argb: 'FF232856' } };
+
+    ws.addRow([`Generado: ${new Date().toLocaleDateString('es-CL')}`]);
+    ws.mergeCells('A2:G2');
+    ws.getRow(2).font = { size: 10, color: { argb: 'FF6B7280' } };
+
+    ws.addRow([]);
+
+    // Resumen por formulario
+    ws.addRow(['Resumen por Evaluacion']);
+    ws.mergeCells('A4:G4');
+    ws.getRow(4).font = { bold: true, size: 11 };
+
+    const headers1 = ['Evaluacion', 'Estado', 'Asignados', 'Aprobados', 'Completados', 'Pendientes', 'Vencidos'];
+    const hr1 = ws.addRow(headers1);
+    hr1.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    hr1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF232856' } };
+
+    const estadoLabel = (e) => {
+      switch (e) {
+        case 'completado': return 'Completado';
+        case 'vencido': return 'Vencido';
+        case 'pendiente': return 'Pendiente';
+        default: return e;
+      }
+    };
+
+    for (const f of formsResult.rows) {
+      ws.addRow([
+        f.titulo, estadoLabel(f.estado_formulario), f.total_asignados,
+        f.aprobados, f.completados, f.pendientes, f.vencidos,
+      ]);
+    }
+
+    ws.addRow([]);
+
+    // Detalle completo
+    ws.addRow(['Detalle por Proveedor']);
+    ws.mergeCells('A' + (formsResult.rows.length + 7) + ':G' + (formsResult.rows.length + 7));
+    ws.getRow(formsResult.rows.length + 7).font = { bold: true, size: 11 };
+
+    const headers2 = ['Evaluacion', 'Proveedor', 'RUT', 'Email', 'Estado', 'Validacion', 'Fecha Respuesta'];
+    const hr2 = ws.addRow(headers2);
+    hr2.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    hr2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF232856' } };
+
+    const validacionLabel = (v) => {
+      switch (v) {
+        case 'validado': return 'Aprobado';
+        case 'rechazado': return 'Rechazado';
+        default: return v === null && detailResult.rows.some(r => r.estado === 'completado') ? 'Pendiente' : '-';
+      }
+    };
+
+    for (const row of detailResult.rows) {
+      ws.addRow([
+        row.formulario,
+        `${row.nombre || ''} ${row.apellido || ''}`.trim(),
+        row.rut || '',
+        row.email || '',
+        estadoLabel(row.estado),
+        row.estado === 'completado' ? validacionLabel(row.estado_validacion) : '-',
+        row.fecha_respuesta ? new Date(row.fecha_respuesta).toLocaleDateString('es-CL') : '',
+      ]);
+    }
+
+    ws.columns.forEach((col) => { col.width = 22 });
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${empresa} - Estado.xlsx"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    console.error('Error exportando empresa:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+};
+
+module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll, exportFormStatus, companyFormDetail, exportCompanyDetail };

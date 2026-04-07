@@ -12,6 +12,8 @@ const reportService = {
   reportByUser: (params) => api.get('/reports/users', { params }).then((r) => r.data),
   reportSurveys: (params) => api.get('/reports/surveys', { params }).then((r) => r.data),
   reportByCompany: (params) => api.get('/reports/companies', { params }).then((r) => r.data),
+  companyFormDetail: (empresa) => api.get('/reports/company-detail', { params: { empresa } }).then((r) => r.data),
+  exportCompanyDetail: (empresa) => api.get('/reports/company-detail/export', { params: { empresa }, responseType: 'blob' }).then((r) => r.data),
   userDetail: (userId) => api.get(`/reports/user/${userId}/detail`).then((r) => r.data),
   exportAll: (params, format = 'xlsx') =>
     api.get('/reports/export-all', { params: { ...params, format }, responseType: 'blob' }).then((r) => r.data),
