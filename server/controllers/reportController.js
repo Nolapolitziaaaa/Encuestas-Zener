@@ -933,6 +933,11 @@ const companyFormDetail = async (req, res) => {
     const { empresa } = req.query;
     if (!empresa) return res.status(400).json({ error: 'Empresa requerida' });
 
+    const empresaCondition = empresa === 'Sin empresa'
+      ? 'u.empresa IS NULL'
+      : 'u.empresa = $1';
+    const params = empresa === 'Sin empresa' ? [] : [empresa];
+
     const result = await pool.query(`
       SELECT f.id as formulario_id, f.titulo, f.fecha_limite, f.estado as estado_formulario,
         COUNT(a.id) as total_asignados,
@@ -950,10 +955,10 @@ const companyFormDetail = async (req, res) => {
       FROM formularios f
       JOIN asignaciones_formulario a ON a.formulario_id = f.id
       JOIN usuarios u ON a.proveedor_id = u.id
-      WHERE u.empresa = $1 AND u.rol = 'usuario'
+      WHERE ${empresaCondition} AND u.rol = 'usuario'
       GROUP BY f.id, f.titulo, f.fecha_limite, f.estado
       ORDER BY f.fecha_creacion DESC
-    `, [empresa]);
+    `, params);
 
     res.json({ empresa, formularios: result.rows });
   } catch (err) {
@@ -966,6 +971,11 @@ const exportCompanyDetail = async (req, res) => {
   try {
     const { empresa } = req.query;
     if (!empresa) return res.status(400).json({ error: 'Empresa requerida' });
+
+    const empresaCondition = empresa === 'Sin empresa'
+      ? 'u.empresa IS NULL'
+      : 'u.empresa = $1';
+    const params = empresa === 'Sin empresa' ? [] : [empresa];
 
     // Datos por formulario
     const formsResult = await pool.query(`
@@ -980,10 +990,10 @@ const exportCompanyDetail = async (req, res) => {
       FROM formularios f
       JOIN asignaciones_formulario a ON a.formulario_id = f.id
       JOIN usuarios u ON a.proveedor_id = u.id
-      WHERE u.empresa = $1 AND u.rol = 'usuario'
+      WHERE ${empresaCondition} AND u.rol = 'usuario'
       GROUP BY f.id, f.titulo, f.fecha_limite, f.estado
       ORDER BY f.fecha_creacion DESC
-    `, [empresa]);
+    `, params);
 
     // Detalle por proveedor y formulario
     const detailResult = await pool.query(`
@@ -993,9 +1003,9 @@ const exportCompanyDetail = async (req, res) => {
       FROM formularios f
       JOIN asignaciones_formulario a ON a.formulario_id = f.id
       JOIN usuarios u ON a.proveedor_id = u.id
-      WHERE u.empresa = $1 AND u.rol = 'usuario'
+      WHERE ${empresaCondition} AND u.rol = 'usuario'
       ORDER BY f.titulo, u.apellido, u.nombre
-    `, [empresa]);
+    `, params);
 
     const workbook = new ExcelJS.Workbook();
     const ws = workbook.addWorksheet(empresa.substring(0, 31));
