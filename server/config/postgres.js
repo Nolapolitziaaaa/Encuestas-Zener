@@ -16,6 +16,33 @@ pool.on('error', (err) => {
   process.exit(-1);
 });
 
+/**
+ * Execute a query with RLS session variables set.
+ * Acquires a client, sets app.user_id in a transaction,
+ * runs the query, and releases the client.
+ *
+ * @param {Object} user - The authenticated user object (req.user)
+ * @param {string} text - SQL query
+ * @param {Array} params - Query parameters
+ */
+const queryWithRLS = async (user, text, params) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (user && user.id) {
+      await client.query('SET LOCAL app.user_id = $1', [String(user.id)]);
+    }
+    const result = await client.query(text, params);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 const testConnection = async () => {
   try {
     const client = await pool.connect();
@@ -27,4 +54,4 @@ const testConnection = async () => {
   }
 };
 
-module.exports = { pool, testConnection };
+module.exports = { pool, testConnection, queryWithRLS };
