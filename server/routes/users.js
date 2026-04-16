@@ -70,12 +70,12 @@ router.put('/:id/toggle-active', verifyToken, requireAdmin, async (req, res) => 
 router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, apellido, email, empresa } = req.body;
+    const { nombre, apellido, email, empresa, rut } = req.body;
 
     const result = await pool.query(
-      `UPDATE usuarios SET nombre = $1, apellido = $2, email = $3, empresa = $4
-       WHERE id = $5 RETURNING id, rut, nombre, apellido, email, rol, activo, fecha_registro, ultimo_acceso, empresa`,
-      [nombre, apellido || '', email, empresa || '', id]
+      `UPDATE usuarios SET nombre = $1, apellido = $2, email = $3, empresa = $4, rut = $5
+       WHERE id = $6 RETURNING id, rut, nombre, apellido, email, rol, activo, fecha_registro, ultimo_acceso, empresa`,
+      [nombre, apellido || '', email, empresa || '', rut || '', id]
     );
 
     if (result.rows.length === 0) {

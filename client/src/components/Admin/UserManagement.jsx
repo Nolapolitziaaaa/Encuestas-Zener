@@ -254,6 +254,10 @@ function UsersTab() {
         {editingUser && (
           <div className="space-y-4">
             <div>
+              <label className="label">RUT</label>
+              <input type="text" value={editingUser.rut || ''} onChange={(e) => setEditingUser((p) => ({ ...p, rut: e.target.value }))} className="input" placeholder="12345678-9" />
+            </div>
+            <div>
               <label className="label">Nombre *</label>
               <input type="text" value={editingUser.nombre} onChange={(e) => setEditingUser((p) => ({ ...p, nombre: e.target.value }))} className="input" />
             </div>
