@@ -2,7 +2,6 @@ require('dotenv').config({ path: require('path').join(__dirname, '.env') });
 
 const express = require('express');
 const cors = require('cors');
-const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const multer = require('multer');
@@ -27,36 +26,9 @@ const PORT = process.env.PORT || 3002;
 // Trust proxy para rate limiting detrás de Nginx
 app.set('trust proxy', 1);
 
-const allowedOrigins = [
-  'https://encuestas.zener-chile.cl',
-  'https://encuestas.zener.cl',
-];
-
 // Middleware
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:"],
-      connectSrc: ["'self'", "https://encuestas.zener-chile.cl"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      upgradeInsecureRequests: [],
-    },
-  },
-}));
-
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true,
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -223,7 +195,15 @@ if (process.env.NODE_ENV === 'production') {
 app.use((err, req, res, next) => {
   console.error('Error:', err.message);
   if (err.name === 'MulterError') {
-    return res.status(400).json({ error: err.message });
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      const maxMB = Math.round((parseInt(process.env.UPLOAD_MAX_SIZE) || 10485760) / 1048576);
+      return res.status(400).json({ error: `El archivo supera el limite de ${maxMB}MB permitido` });
+    }
+    return res.status(400).json({ error: 'Error al subir el archivo: ' + err.message });
+  }
+  if (err.type === 'entity.too.large') {
+    const maxMB = Math.round((parseInt(process.env.UPLOAD_MAX_SIZE) || 10485760) / 1048576);
+    return res.status(413).json({ error: `El archivo supera el limite de ${maxMB}MB permitido` });
   }
   res.status(500).json({ error: 'Error interno del servidor' });
 });

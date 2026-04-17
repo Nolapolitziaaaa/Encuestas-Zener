@@ -19,5 +19,6 @@ router.get('/companies', verifyToken, requireAdmin, reportController.reportByCom
 router.get('/company-detail', verifyToken, requireAdmin, reportController.companyFormDetail);
 router.get('/company-detail/export', verifyToken, requireAdmin, reportController.exportCompanyDetail);
 router.get('/export-all', verifyToken, requireAdmin, reportController.exportAll);
+router.get('/form/:id/download-files', verifyToken, requireAdmin, reportController.downloadFormFiles);
 
 module.exports = router;

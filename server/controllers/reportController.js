@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
 const crypto = require('crypto');
+const archiver = require('archiver');
 
 const summary = async (req, res) => {
   try {
@@ -1091,4 +1092,86 @@ const exportCompanyDetail = async (req, res) => {
   }
 };
 
-module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll, exportFormStatus, companyFormDetail, exportCompanyDetail };
+const downloadFormFiles = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const formResult = await pool.query(
+      'SELECT titulo FROM formularios WHERE id = $1',
+      [id]
+    );
+    if (formResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Formulario no encontrado' });
+    }
+    const formTitle = formResult.rows[0].titulo;
+
+    const result = await pool.query(
+      `SELECT
+        u.nombre, u.apellido, u.empresa, u.rut,
+        vr.archivo_url, vr.valor_texto
+       FROM valores_respuesta vr
+       JOIN respuestas_formulario rf ON vr.respuesta_id = rf.id
+       JOIN asignaciones_formulario af ON rf.asignacion_id = af.id
+       JOIN usuarios u ON rf.proveedor_id = u.id
+       WHERE rf.formulario_id = $1
+         AND (vr.archivo_url IS NOT NULL
+              OR (vr.valor_texto IS NOT NULL AND vr.valor_texto LIKE '/uploads/%'))
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No hay archivos para descargar en este formulario' });
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    const safeName = formTitle.replace(/[^a-zA-Z0-9áéíóúÁÉÍÓÚñÑ _-]/g, '').replace(/\s+/g, '_').substring(0, 80);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    archive.pipe(res);
+
+    let fileCount = 0;
+    for (const row of result.rows) {
+      const fileUrl = row.archivo_url
+        || (row.valor_texto && row.valor_texto.startsWith('/uploads/') ? row.valor_texto : null);
+      if (!fileUrl) continue;
+
+      const folderName = (row.empresa || `${row.nombre || ''} ${row.apellido || ''}`.trim() || row.rut)
+        .replace(/[/\\:*?"<>|]/g, '_')
+        .replace(/\s+/g, '_')
+        .substring(0, 80);
+
+      const filePath = path.join(__dirname, '..', fileUrl);
+      if (fs.existsSync(filePath)) {
+        const filename = fileUrl.split('/').pop();
+        archive.file(filePath, { name: `${folderName}/${filename}` });
+        fileCount++;
+      }
+    }
+
+    if (fileCount === 0) {
+      archive.abort();
+      if (!res.headersSent) {
+        res.status(404).json({ error: 'Los archivos no fueron encontrados en el servidor' });
+      }
+      return;
+    }
+
+    archive.on('error', (err) => {
+      console.error('Error creando ZIP:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Error generando archivo ZIP' });
+      }
+    });
+
+    archive.finalize();
+  } catch (err) {
+    console.error('Error descargando archivos del formulario:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Error interno del servidor' });
+    }
+  }
+};
+
+module.exports = { summary, formDetail, exportForm, formResponses, reportByUser, reportSurveys, userDetail, formUserStatus, previewFile, previewServe, reportByCompany, exportAll, exportFormStatus, companyFormDetail, exportCompanyDetail, downloadFormFiles };

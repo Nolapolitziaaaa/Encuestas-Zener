@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import formService from '../../services/formService';
 import templateService from '../../services/templateService';
+import reportService from '../../services/reportService';
 import api from '../../services/api';
 import Modal from '../Common/Modal';
 import {
   Plus, Trash2, Eye, Send, Filter, Calendar, Users, CheckCircle, Clock,
-  Search, X, UserPlus, Check
+  Search, X, UserPlus, Check, Download, Loader2
 } from 'lucide-react';
 
 export default function FormManager() {
@@ -15,6 +16,7 @@ export default function FormManager() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  const [downloadingFiles, setDownloadingFiles] = useState(null);
   const [filter, setFilter] = useState('all');
 
   // Form creation state
@@ -23,7 +25,6 @@ export default function FormManager() {
     proveedor_ids: [],
     fecha_limite: '',
   });
-  const [creating, setCreating] = useState(false);
 
   // User selector state
   const [userSearch, setUserSearch] = useState('');
@@ -67,9 +68,7 @@ export default function FormManager() {
       alert('Completa todos los campos requeridos');
       return;
     }
-    if (creating) return;
 
-    setCreating(true);
     try {
       await formService.create({
         ...newForm,
@@ -83,8 +82,6 @@ export default function FormManager() {
       loadData();
     } catch (err) {
       alert('Error: ' + (err.response?.data?.error || err.message));
-    } finally {
-      setCreating(false);
     }
   };
 
@@ -136,6 +133,24 @@ export default function FormManager() {
         p.email?.toLowerCase().includes(term))
     );
   });
+
+  const handleDownloadFiles = async (id, titulo) => {
+    setDownloadingFiles(id);
+    try {
+      const blob = await reportService.downloadFormFiles(id);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${titulo || 'formulario'}.zip`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      const msg = err.response?.data?.error || err.message;
+      alert(msg.includes('404') || msg.includes('No hay archivos') ? 'Este formulario no tiene archivos para descargar.' : 'Error descargando archivos: ' + msg);
+    } finally {
+      setDownloadingFiles(null);
+    }
+  };
 
   const loadDetail = async (id) => {
     try {
@@ -241,6 +256,21 @@ export default function FormManager() {
                     <Eye className="w-4 h-4 mr-1" />
                     Detalle
                   </button>
+                  {form.total_completados > 0 && (
+                    <button
+                      onClick={() => handleDownloadFiles(form.id, form.titulo)}
+                      disabled={downloadingFiles === form.id}
+                      className="btn-secondary text-sm py-1.5 px-3 text-green-700 hover:bg-green-50 flex items-center disabled:opacity-50"
+                      title="Descargar archivos de todas las empresas"
+                    >
+                      {downloadingFiles === form.id ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4 mr-1" />
+                      )}
+                      Archivos
+                    </button>
+                  )}
                   {form.estado === 'pendiente' && (
                     <button
                       onClick={() => handleDelete(form.id)}
@@ -405,18 +435,9 @@ export default function FormManager() {
 
           <div className="flex space-x-3 pt-2">
             <button onClick={() => { setShowCreate(false); setUserSearch(''); }} className="flex-1 btn-secondary">Cancelar</button>
-            <button onClick={handleCreate} disabled={creating} className="flex-1 btn-primary flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">
-              {creating ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
-                  Creando...
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 mr-2" />
-                  Crear y Enviar
-                </>
-              )}
+            <button onClick={handleCreate} className="flex-1 btn-primary flex items-center justify-center">
+              <Send className="w-4 h-4 mr-2" />
+              Crear y Enviar
             </button>
           </div>
         </div>

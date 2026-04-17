@@ -216,7 +216,7 @@ export default function FieldRenderer({
                   <UploadCloud className="w-5 h-5 text-[#94a3b8] group-hover:text-[#7095B4] transition-colors" />
                 </div>
                 <span className="text-sm text-[#475569] font-medium">Seleccionar archivo</span>
-                <p className="text-xs text-[#94a3b8] mt-0.5">Word, Excel, PPT, PDF, Imagen, Video, Audio (max 10MB)</p>
+                <p className="text-xs text-[#94a3b8] mt-0.5">Word, Excel, PPT, PDF, Imagen, Video, Audio (max 50MB)</p>
               </div>
               {!disabled && (
                 <input
